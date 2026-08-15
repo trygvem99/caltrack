@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#101418" />
+  <title>CalTrack</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+</head>
+<body>
+  <header>
+    <h1>CalTrack</h1>
+    <nav>
+      <button data-view="today" class="tab active">Today</button>
+      <button data-view="history" class="tab">History</button>
+      <button data-view="settings" class="tab">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- TODAY -->
+    <section id="view-today" class="view">
+      <div class="card" id="weight-card">
+        <div class="weight-row">
+          <span id="weight-label">Morning weight</span>
+          <input type="number" id="f-morning-weight" min="30" max="300" step="0.1" placeholder="kg" inputmode="decimal" />
+          <button class="btn small" id="save-weight-btn">Log</button>
+        </div>
+        <div class="stat-sub" id="weight-trend"></div>
+        <button class="linkish tiny" id="new-series-btn">new scale / location</button>
+      </div>
+
+      <div class="hint nag" id="backup-nag" hidden>Backup is stale — export one from Settings.</div>
+
+      <div class="card" id="today-summary">
+        <div class="stat">
+          <div class="stat-head"><span>Calories</span><span id="kcal-nums">–</span></div>
+          <div class="bar"><div id="kcal-bar" class="fill"></div></div>
+          <div class="stat-sub" id="kcal-sub"></div>
+        </div>
+        <div class="stat">
+          <div class="stat-head"><span>Protein</span><span id="prot-nums">–</span></div>
+          <div class="bar"><div id="prot-bar" class="fill prot"></div></div>
+          <div class="stat-sub" id="prot-sub"></div>
+        </div>
+        <div class="stat-sub" id="tier-line"></div>
+      </div>
+
+      <div class="text-entry">
+        <input type="text" id="text-entry-input" placeholder="e.g. the teriyaki roll and a protein milk" />
+        <button class="btn small primary" id="text-entry-btn">Log</button>
+      </div>
+
+      <h2>Meals today</h2>
+      <div id="meal-list"></div>
+
+      <div class="fab-row">
+        <label class="fab" for="photo-input">📷 Scan</label>
+        <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
+        <label class="fab secondary" for="label-input">🏷 Label</label>
+        <input type="file" id="label-input" accept="image/*" capture="environment" hidden />
+        <button class="fab secondary" id="manual-meal-btn">＋</button>
+      </div>
+    </section>
+
+    <!-- SCAN / REVIEW -->
+    <section id="view-scan" class="view" hidden>
+      <img id="scan-preview" alt="" />
+      <div id="scan-status" class="card center" hidden>
+        <div class="spinner"></div>
+        <p id="scan-status-text">Analyzing…</p>
+      </div>
+      <div id="scan-result" hidden>
+        <div class="card question" id="question-banner" hidden>
+          <p id="question-text"></p>
+          <button class="btn small" id="looks-right-btn">Looks right as-is</button>
+        </div>
+        <p class="hint" id="scan-hint">Adjust grams — macros rescale automatically.</p>
+        <div id="scan-items"></div>
+        <button class="linkish" id="add-item-btn">＋ Add item manually</button>
+        <p id="scan-notes" class="hint"></p>
+        <div class="card totals" id="scan-totals"></div>
+        <div class="btn-row">
+          <button class="btn primary" id="save-meal-btn">Save meal</button>
+          <button class="btn" id="save-recipe-btn" hidden>Save as recipe</button>
+          <button class="btn" id="cancel-scan-btn">Cancel</button>
+        </div>
+      </div>
+      <datalist id="food-names"></datalist>
+    </section>
+
+    <!-- HISTORY -->
+    <section id="view-history" class="view" hidden>
+      <div class="card" id="hist-weight-card"></div>
+      <div class="card" id="hist-tdee-card"></div>
+      <div class="card hint" id="hist-corrections"></div>
+      <div id="history-days"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="view-settings" class="view" hidden>
+      <div class="card">
+        <h2>API key</h2>
+        <p class="hint">Your Anthropic API key, stored only on this phone.</p>
+        <div class="weight-row">
+          <input type="password" id="f-api-key" placeholder="sk-ant-…" autocomplete="off" />
+          <button class="btn small" id="save-key-btn">Save</button>
+        </div>
+        <p class="hint" id="key-status"></p>
+      </div>
+
+      <div class="card">
+        <h2>Daily targets (kcal per weekday)</h2>
+        <div class="weekday-grid" id="weekday-targets"></div>
+        <label>Protein target (g)<input type="number" id="f-prot-target" min="40" max="400" /></label>
+        <label>Current TDEE (kcal)<input type="number" id="f-tdee" min="1000" max="6000" /></label>
+        <details class="hint">
+          <summary>Suggest a starting TDEE (Mifflin-St Jeor)</summary>
+          <div class="field-grid">
+            <label>Weight (kg)<input type="number" id="f-weight" step="0.1" /></label>
+            <label>Height (cm)<input type="number" id="f-height" /></label>
+            <label>Age<input type="number" id="f-age" /></label>
+            <label>Sex
+              <select id="f-sex"><option value="male">Male</option><option value="female">Female</option></select>
+            </label>
+          </div>
+          <label>Activity
+            <select id="f-activity">
+              <option value="1.2">Sedentary</option>
+              <option value="1.375">Light</option>
+              <option value="1.55" selected>Moderate</option>
+              <option value="1.725">Very active</option>
+            </select>
+          </label>
+          <button class="btn small" id="mifflin-btn">Suggest</button>
+          <span id="mifflin-out"></span>
+        </details>
+        <button class="btn primary" id="save-profile-btn">Save targets</button>
+        <p id="settings-saved" class="hint" hidden>Saved ✓</p>
+      </div>
+
+      <div class="card">
+        <h2>Foods</h2>
+        <div id="foods-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>Weight series</h2>
+        <div id="series-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>Backup</h2>
+        <p class="hint" id="last-backup-line"></p>
+        <div class="btn-row">
+          <button class="btn" id="backup-btn">Backup</button>
+          <label class="btn" for="restore-input">Restore / import</label>
+          <input type="file" id="restore-input" accept="application/json,.json" hidden />
+        </div>
+        <p class="hint">On iPhone: install to home screen FIRST, then enter your key and import inside the installed app — Safari and the installed app do not share data.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="math.js"></script>
+  <script src="db.js"></script>
+  <script src="llm.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

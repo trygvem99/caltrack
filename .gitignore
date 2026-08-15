@@ -1,0 +1,5 @@
+.env
+data/
+legacy.json
+node_modules/
+.env.example
