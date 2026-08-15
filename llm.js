@@ -151,5 +151,56 @@ Rules:
     return call({ system: TEXT_SYSTEM, content, schema: TEXT_SCHEMA, maxTokens: 1500 });
   }
 
-  return { analyzePhoto, analyzeLabel, parseText, MODEL };
+  // ---------- revision: apply a stated correction to an existing item list ----------
+  const REVISE_ITEM = {
+    type: "object", additionalProperties: false,
+    required: ["kind", "food_id", "grams", "name", "kcal", "kcal_low", "kcal_high", "protein_g", "carbs_g", "fat_g"],
+    properties: {
+      kind: { type: "string", enum: ["food", "estimate"] },
+      food_id: NULL_STR, grams: NULL_NUM, name: NULL_STR,
+      kcal: NULL_NUM, kcal_low: NULL_NUM, kcal_high: NULL_NUM,
+      protein_g: NULL_NUM, carbs_g: NULL_NUM, fat_g: NULL_NUM,
+    },
+  };
+  const REVISE_SCHEMA = {
+    type: "object", additionalProperties: false,
+    required: ["items", "summary", "question"],
+    properties: {
+      items: { type: "array", items: REVISE_ITEM },
+      summary: { type: "string" },
+      question: NULL_STR,
+    },
+  };
+
+  const REVISE_SYSTEM = `You are revising an already-estimated meal using a correction from the person who actually ate it.
+
+THE CORRECTION IS AUTHORITATIVE. They were there; you only saw a photo. Never argue with a stated quantity, ingredient or brand, and never re-estimate something they just told you. If they say three eggs, it is three eggs.
+
+Return the COMPLETE revised item list, not just the changes. Every item is one of:
+- kind="food": the item is an entry in FOODS — either the user said so ("these are my labelled eggs"), or it plainly matches one. Return food_id and grams, and leave every macro field null; the app fills exact values from its own database. PREFER THIS whenever it applies: it replaces a guess with label data, which is the entire point.
+- kind="estimate": nothing in FOODS matches. Return name, grams, median kcal, an honest 80% interval as kcal_low/kcal_high, and macros.
+
+Applying the correction:
+- A quantity change rescales that item ("3 eggs not 4" means three eggs' worth).
+- Cooking fat the user discloses (oil, butter) becomes its OWN separate item, never folded into another item's numbers, so it stays visible and editable. Use a FOODS entry for it when one exists.
+- Anything they say was not in the dish is removed entirely.
+- Items the correction does not mention carry over UNCHANGED, including their grams and macros.
+- Convert stated amounts rather than inventing units: a tablespoon of butter or oil is about 14 g, a teaspoon about 5 g.
+
+summary: one short sentence naming what changed, e.g. "Eggs 4 to 3, added 14 g butter, linked the ham to your saved food."
+question: one further question ONLY if the correction itself is genuinely ambiguous; otherwise null. Never re-ask something they just answered.`;
+
+  function reviseItems(items, instruction, foodsDigest) {
+    const lines = items.map((i, n) => {
+      const linked = i.food_id ? " | linked food_id=" + i.food_id : "";
+      return (n + 1) + ". " + i.name + " | " + i.grams + " g | " + Math.round(i.kcal) +
+        " kcal | P" + i.protein_g + " C" + i.carbs_g + " F" + i.fat_g + linked;
+    });
+    const text = "FOODS (id | name | aliases | kcal per 100g | default_g):\n" + foodsDigest +
+      "\n\nCURRENT ITEMS:\n" + lines.join("\n") +
+      "\n\nUSER CORRECTION: " + instruction;
+    return call({ system: REVISE_SYSTEM, content: [{ type: "text", text }], schema: REVISE_SCHEMA, maxTokens: 2500 });
+  }
+
+  return { analyzePhoto, analyzeLabel, parseText, reviseItems, MODEL };
 })();

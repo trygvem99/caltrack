@@ -29,10 +29,16 @@ http
     if (!file.startsWith(ROOT)) return res.writeHead(403).end("Forbidden");
     fs.readFile(file, (err, data) => {
       if (err) return res.writeHead(404).end("Not found");
-      res.writeHead(200, {
+      const headers = {
         "Content-Type": TYPES[path.extname(file)] || "application/octet-stream",
         "Cache-Control": "no-cache",
-      });
+      };
+      // ?download=1 forces save-as instead of rendering inline (phone transfers)
+      if (url.searchParams.get("download") === "1") {
+        headers["Content-Disposition"] =
+          'attachment; filename="' + path.basename(file) + '"';
+      }
+      res.writeHead(200, headers);
       res.end(data);
     });
   })

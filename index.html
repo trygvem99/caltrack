@@ -75,11 +75,22 @@
       <div id="scan-result" hidden>
         <div class="card question" id="question-banner" hidden>
           <p id="question-text"></p>
-          <button class="btn small" id="looks-right-btn">Looks right as-is</button>
+          <div class="revise-row">
+            <input type="text" id="question-answer" placeholder="e.g. a tablespoon of butter" />
+            <button class="btn small primary" id="answer-question-btn">Answer</button>
+          </div>
+          <button class="linkish tiny" id="looks-right-btn">Skip — looks right as-is</button>
         </div>
         <p class="hint" id="scan-hint">Adjust grams — macros rescale automatically.</p>
         <div id="scan-items"></div>
         <button class="linkish" id="add-item-btn">＋ Add item manually</button>
+        <div class="card revise-card">
+          <div class="revise-row">
+            <input type="text" id="revise-input" placeholder="e.g. 3 eggs not 4, and the ham is my saved one" />
+            <button class="btn small primary" id="revise-btn">Revise</button>
+          </div>
+          <p class="hint" id="revise-summary"></p>
+        </div>
         <p id="scan-notes" class="hint"></p>
         <div class="card totals" id="scan-totals"></div>
         <div class="btn-row">

@@ -14,6 +14,7 @@ let corrections = [];
 
 let scanItems = [];          // items being reviewed before save
 let scanQuestion = null;
+let scanRevisions = [];      // spoken corrections this review; flushed to the ledger on save
 let editingEntryId = null;   // set when re-opening a saved entry
 let editingPrevItems = null; // snapshot for post-save correction diff
 
@@ -216,6 +217,10 @@ function startScanView() {
   $("#view-scan").hidden = false;
   $("#scan-result").hidden = true;
   $("#question-banner").hidden = true;
+  scanRevisions = [];
+  $("#revise-summary").textContent = "";
+  $("#revise-input").value = "";
+  $("#question-answer").value = "";
 }
 
 function setScanBusy(text) {
@@ -333,6 +338,15 @@ function foodToScanItem(food, grams) {
 }
 
 // ---------- loose-text entry ----------
+// Most-recently-used first, capped so the per-call cost can't creep upward.
+function foodsDigest() {
+  return foods
+    .slice().sort((a, b) => ((b.last_used || "") < (a.last_used || "") ? -1 : 1))
+    .slice(0, 100)
+    .map((f) => `${f.id} | ${f.name} | ${(f.aliases || []).join(",")} | ${f.per_100g.kcal} kcal/100g | ${f.default_g || 100}`)
+    .join("\n") || "(empty)";
+}
+
 $("#text-entry-btn").addEventListener("click", async () => {
   const text = $("#text-entry-input").value.trim();
   if (!text) return;
@@ -340,11 +354,7 @@ $("#text-entry-btn").addEventListener("click", async () => {
   startScanView();
   setScanBusy("Working out what you ate…");
   try {
-    const digest = foods
-      .slice().sort((a, b) => ((b.last_used || "") < (a.last_used || "") ? -1 : 1))
-      .slice(0, 100)
-      .map((f) => `${f.id} | ${f.name} | ${(f.aliases || []).join(",")} | ${f.per_100g.kcal} kcal/100g | ${f.default_g || 100}`)
-      .join("\n");
+    const digest = foodsDigest();
     const cutoff = dateNDaysAgo(14);
     const recent = log
       .filter((e) => e.date >= cutoff && !e.items.every((i) => i.provenance === "legacy"))
@@ -430,6 +440,87 @@ $("#looks-right-btn").addEventListener("click", () => {
   renderScanItems();
 });
 
+// Apply a spoken correction ("3 eggs not 4", "a tablespoon of butter", "the ham
+// is my saved one"). The user's statement is authoritative — they were there.
+async function reviseScan(instruction) {
+  const text = (instruction || "").trim();
+  if (!text) return;
+  const before = entryTotals(scanItems.map(itemMacros)).kcal;
+  const prevByName = new Map(scanItems.map((it) => [it.name.trim().toLowerCase(), it]));
+  const snapshot = scanItems.map((it) => {
+    const m = itemMacros(it);
+    return {
+      name: it.name, grams: it.grams, kcal: m.kcal,
+      protein_g: r1(m.protein_g), carbs_g: r1(m.carbs_g), fat_g: r1(m.fat_g),
+      food_id: it.food_id,
+    };
+  });
+
+  $("#scan-result").hidden = true;
+  setScanBusy("Applying your correction…");
+  try {
+    const r = await LLM.reviseItems(snapshot, text, foodsDigest());
+    const revised = [];
+    for (const it of r.items || []) {
+      const prev = prevByName.get((it.name || "").trim().toLowerCase());
+      if (it.kind === "food" && it.food_id) {
+        const food = foods.find((f) => f.id === it.food_id);
+        if (food) {
+          const si = foodToScanItem(food, Math.round(it.grams || food.default_g || 100));
+          si.est = prev ? prev.est : null; // keep the original estimate so the ledger sees the swap
+          revised.push(si);
+          continue;
+        }
+      }
+      const pm = prev ? itemMacros(prev) : null;
+      const grams = Math.round(it.grams || (prev ? prev.grams : 100));
+      const kcal = it.kcal != null ? it.kcal : pm ? pm.kcal : 0;
+      const fresh = it.kcal != null
+        ? {
+            portion_g: grams, kcal,
+            kcal_low: it.kcal_low != null ? it.kcal_low : kcal * 0.75,
+            kcal_high: it.kcal_high != null ? it.kcal_high : kcal * 1.25,
+            protein_g: it.protein_g || 0, carbs_g: it.carbs_g || 0, fat_g: it.fat_g || 0,
+          }
+        : null;
+      revised.push({
+        name: it.name || (prev ? prev.name : "Item"), grams,
+        base: {
+          portion_g: grams, kcal,
+          protein_g: it.protein_g != null ? it.protein_g : pm ? pm.protein_g : 0,
+          carbs_g: it.carbs_g != null ? it.carbs_g : pm ? pm.carbs_g : 0,
+          fat_g: it.fat_g != null ? it.fat_g : pm ? pm.fat_g : 0,
+        },
+        // an item that already existed keeps its ORIGINAL estimate, so a quantity
+        // correction is recorded against what the model first claimed
+        est: prev && prev.est ? prev.est : fresh,
+        provenance: prev ? prev.provenance : "photo",
+        unc: prev ? prev.unc : UNC.photo,
+        unresolved: false, hidden_factor: null,
+        food_id: null, source: prev ? prev.source : "model",
+      });
+    }
+    if (!revised.length) throw new Error("the revision returned no items");
+    scanItems = revised;
+    const after = entryTotals(scanItems.map(itemMacros)).kcal;
+    scanRevisions.push({ from: before, to: after, instruction: text });
+    scanQuestion = r.question || null;
+    $("#revise-summary").textContent =
+      `${r.summary || "Revised."} (${before} → ${after} kcal)`;
+    $("#revise-input").value = "";
+    $("#question-answer").value = "";
+  } catch (e) {
+    alert("Revision failed: " + e.message);
+  }
+  $("#scan-status").hidden = true;
+  openReview();
+}
+
+$("#answer-question-btn").addEventListener("click", () => reviseScan($("#question-answer").value));
+$("#revise-btn").addEventListener("click", () => reviseScan($("#revise-input").value));
+$("#question-answer").addEventListener("keydown", (e) => { if (e.key === "Enter") reviseScan(e.target.value); });
+$("#revise-input").addEventListener("keydown", (e) => { if (e.key === "Enter") reviseScan(e.target.value); });
+
 function itemMacros(it) {
   const f = it.base.portion_g > 0 ? it.grams / it.base.portion_g : 1;
   return {
@@ -486,6 +577,12 @@ function renderScanItems() {
         <button class="del" title="Remove">✕</button>
       </div>
       ${match ? `<button class="chip match" data-f="match">use saved: ${match.per_100g.kcal} kcal/100g</button>` : ""}
+      <select class="link-food ${it.food_id ? "linked" : ""}" data-f="linkfood">
+        <option value="">🔗 link a saved food…</option>
+        ${foods.slice().sort((a, b) => a.name.localeCompare(b.name))
+          .map((f) => `<option value="${f.id}" ${f.id === it.food_id ? "selected" : ""}>${esc(f.name)} — ${f.per_100g.kcal}/100g</option>`)
+          .join("")}
+      </select>
       ${it.hidden_factor && it.unresolved ? `<div class="badge-hidden" data-f="hidden">● ${esc(it.hidden_factor)} — tap when resolved</div>` : ""}
       <div class="item-macros">
         <label>g <input type="number" min="0" value="${it.grams}" data-f="grams" /></label>
@@ -507,13 +604,24 @@ function renderScanItems() {
       it.provenance = e.target.value;
       it.unc = UNC[it.provenance] ?? it.unc;
     });
+    // Linking a saved food replaces a guess with label data. `est` is kept so the
+    // substitution is still recorded in the ledger as a db-match.
+    const applyFood = (food) => {
+      const applied = foodToScanItem(food, it.grams);
+      Object.assign(it, applied, {
+        grams: it.grams, est: it.est, hidden_factor: it.hidden_factor, unresolved: false,
+      });
+      renderScanItems();
+    };
     const matchBtn = div.querySelector('[data-f="match"]');
     if (matchBtn) matchBtn.addEventListener("click", () => {
       const food = findFoodMatch(it.name);
-      if (!food) return;
-      const applied = foodToScanItem(food, it.grams);
-      Object.assign(it, applied, { grams: it.grams, hidden_factor: it.hidden_factor, unresolved: false });
-      renderScanItems();
+      if (food) applyFood(food);
+    });
+    div.querySelector('[data-f="linkfood"]').addEventListener("change", (e) => {
+      const food = foods.find((f) => f.id === e.target.value);
+      if (!food) { it.food_id = null; renderScanItems(); return; }
+      applyFood(food);
     });
     const hiddenBadge = div.querySelector('[data-f="hidden"]');
     if (hiddenBadge) hiddenBadge.addEventListener("click", () => {
@@ -669,13 +777,28 @@ $("#save-meal-btn").addEventListener("click", async () => {
     for (const { saved, meta } of items) {
       if (!meta.est || !meta.est.portion_g) continue;
       const scaled = meta.est.kcal * (saved.portion_g / meta.est.portion_g);
-      if (scaled > 0 && Math.abs(saved.kcal - scaled) / scaled > 0.02) {
+      if (!(scaled > 0)) continue;
+      if (Math.abs(saved.kcal - scaled) / scaled <= 0.02) continue;
+      const isDbMatch = meta.source === "db";
+      // A spoken revision is recorded once at entry level below. Logging the
+      // per-item deviation as well would count the same decision twice.
+      if (scanRevisions.length && !isDbMatch) continue;
+      toRecord.push({
+        ts: now.toISOString(), entry_id: entryId, item: saved.name,
+        kcal_from: Math.round(scaled), kcal_to: saved.kcal,
+        phase: isDbMatch ? "db-match" : "review",
+      });
+      saved.corrected = true;
+    }
+    // Spoken corrections: one record each, carrying what was actually said.
+    // Quantity changes ("3 eggs not 4") scale est with the portion and so are
+    // invisible to the per-item check above — this is what catches them.
+    for (const rev of scanRevisions) {
+      if (rev.from > 0 && Math.abs(rev.to - rev.from) / rev.from > 0.02) {
         toRecord.push({
-          ts: now.toISOString(), entry_id: entryId, item: saved.name,
-          kcal_from: Math.round(scaled), kcal_to: saved.kcal,
-          phase: meta.source === "db" ? "db-match" : "review",
+          ts: now.toISOString(), entry_id: entryId, item: rev.instruction.slice(0, 80),
+          kcal_from: rev.from, kcal_to: rev.to, phase: "revision",
         });
-        saved.corrected = true;
       }
     }
   }
@@ -704,6 +827,7 @@ $("#save-meal-btn").addEventListener("click", async () => {
   log = log.filter((e) => e.id !== entry.id).concat(entry);
   editingEntryId = null;
   editingPrevItems = null;
+  scanRevisions = [];
   showView("today");
 });
 
@@ -741,7 +865,7 @@ function renderHistory() {
   renderTdeeCard();
 
   // corrections asymmetry
-  const judged = corrections.filter((c) => c.phase === "review" || c.phase === "post-save");
+  const judged = corrections.filter((c) => c.phase === "review" || c.phase === "post-save" || c.phase === "revision");
   const dbm = corrections.filter((c) => c.phase === "db-match").length;
   if (judged.length) {
     const down = judged.filter((c) => c.kcal_to < c.kcal_from).length;
