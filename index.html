@@ -22,6 +22,13 @@
   <main>
     <!-- TODAY -->
     <section id="view-today" class="view">
+      <div class="date-nav">
+        <button class="btn small" id="date-prev" title="Previous day">‹</button>
+        <input type="date" id="log-date" />
+        <button class="btn small" id="date-next" title="Next day">›</button>
+      </div>
+      <div class="hint backdate" id="backdate-note" hidden></div>
+
       <div class="card" id="weight-card">
         <div class="weight-row">
           <span id="weight-label">Morning weight</span>
@@ -154,6 +161,25 @@
 
       <div class="card">
         <h2>Foods</h2>
+        <button class="linkish" id="new-recipe-btn">＋ New recipe from saved ingredients</button>
+        <div id="recipe-builder" hidden>
+          <label>Recipe name<input type="text" id="rb-name" placeholder="e.g. Pancake batter" /></label>
+          <div id="rb-ingredients"></div>
+          <div class="revise-row">
+            <select id="rb-food"></select>
+            <input type="number" id="rb-grams" min="0" placeholder="g" inputmode="decimal" />
+            <button class="btn small" id="rb-add">Add</button>
+          </div>
+          <p class="hint" id="rb-totals"></p>
+          <label>Final weight of the finished batch (g)
+            <input type="number" id="rb-total" min="0" inputmode="decimal" />
+          </label>
+          <p class="hint" id="rb-derived"></p>
+          <div class="btn-row">
+            <button class="btn primary" id="rb-save">Save recipe</button>
+            <button class="btn" id="rb-cancel">Cancel</button>
+          </div>
+        </div>
         <div id="foods-list"></div>
       </div>
 

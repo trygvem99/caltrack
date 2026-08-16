@@ -12,6 +12,7 @@ let weights = [];    // all weigh-ins
 let series = [];     // weight series
 let corrections = [];
 
+let logDate = null;          // the day being logged to; null until init sets today
 let scanItems = [];          // items being reviewed before save
 let scanQuestion = null;
 let scanRevisions = [];      // spoken corrections this review; flushed to the ledger on save
@@ -72,6 +73,12 @@ const activeSeries = () => {
   const s = series.filter((x) => !x.legacy).sort((a, b) => (a.start < b.start ? 1 : -1));
   return s[0] || null;
 };
+// A back-dated weigh-in belongs to whichever series was running on that date,
+// not to whatever series happens to be newest now.
+const seriesForDate = (date) => {
+  const s = series.filter((x) => !x.legacy && x.start <= date).sort((a, b) => (a.start < b.start ? 1 : -1));
+  return s[0] || null;
+};
 const seriesWeights = (s) =>
   weights.filter((w) => w.series === s.id).sort((a, b) => (a.date < b.date ? -1 : 1));
 
@@ -80,7 +87,10 @@ function showView(name) {
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
   $(`#view-${name}`).hidden = false;
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === name));
-  if (name === "today") renderToday();
+  if (name === "today") {
+    if (logDate && logDate > todayStr()) logDate = todayStr();
+    renderToday();
+  }
   if (name === "history") renderHistory();
   if (name === "settings") renderSettings();
 }
@@ -91,9 +101,10 @@ function renderToday() {
   renderWeightCard();
   renderBackupNag();
 
-  const t = dayTotals(todayStr());
-  const [lo, hi] = dayRange(todayStr());
-  const kcalTarget = kcalTargetFor(todayStr());
+  renderDateNav();
+  const t = dayTotals(logDate);
+  const [lo, hi] = dayRange(logDate);
+  const kcalTarget = kcalTargetFor(logDate);
   const protTarget = profile?.protein_target || 0;
 
   $("#kcal-nums").textContent = `${t.kcal} / ${kcalTarget} kcal`;
@@ -109,13 +120,49 @@ function renderToday() {
     ? t.protein_g >= protTarget ? "Protein goal hit ✓" : `${Math.round(protTarget - t.protein_g)} g to go`
     : "";
 
-  $("#tier-line").textContent = tierLine(todayStr());
+  $("#tier-line").textContent = tierLine(logDate);
 
   const list = $("#meal-list");
-  const entries = dayEntries(todayStr()).sort((a, b) => (a.time < b.time ? -1 : 1));
-  list.innerHTML = entries.length ? "" : `<div class="empty">Nothing logged yet.</div>`;
+  const entries = dayEntries(logDate).sort((a, b) => (a.time < b.time ? -1 : 1));
+  list.innerHTML = entries.length ? "" : `<div class="empty">Nothing logged ${logDate === todayStr() ? "yet" : "for this day"}.</div>`;
   for (const e of entries) list.appendChild(mealCard(e));
 }
+
+// ---------- which day am I logging to ----------
+const shiftDate = (date, days) => {
+  const d = new Date(date + "T12:00:00");
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const prettyDate = (date) =>
+  new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+
+function setLogDate(date) {
+  if (date > todayStr()) return;          // no logging into the future
+  logDate = date;
+  renderToday();
+}
+
+function renderDateNav() {
+  $("#log-date").value = logDate;
+  $("#log-date").max = todayStr();
+  $("#date-next").disabled = logDate >= todayStr();
+  const back = logDate !== todayStr();
+  $("#backdate-note").hidden = !back;
+  if (back) {
+    const ago = daysBetween(logDate, todayStr());
+    $("#backdate-note").innerHTML =
+      `Logging to <b>${prettyDate(logDate)}</b> (${ago} day${ago === 1 ? "" : "s"} ago) — <a href="#" id="back-to-today">back to today</a>`;
+    $("#back-to-today").addEventListener("click", (e) => { e.preventDefault(); setLogDate(todayStr()); });
+  }
+}
+
+$("#date-prev").addEventListener("click", () => setLogDate(shiftDate(logDate, -1)));
+$("#date-next").addEventListener("click", () => setLogDate(shiftDate(logDate, 1)));
+$("#log-date").addEventListener("change", (e) => {
+  if (e.target.value) setLogDate(e.target.value);
+  else renderDateNav();
+});
 
 function tierLine(date) {
   const items = dayEntries(date).flatMap((e) => e.items);
@@ -160,9 +207,9 @@ function mealCard(e) {
 
 function renderWeightCard() {
   const s = activeSeries();
-  const today = weights.find((w) => w.date === todayStr() && (!s || w.series === s.id));
-  $("#weight-label").textContent = today ? "Weight ✓" : "Morning weight";
-  $("#f-morning-weight").value = today ? today.kg : "";
+  const onDate = weights.find((w) => w.date === logDate);
+  $("#weight-label").textContent = onDate ? "Weight ✓" : "Morning weight";
+  $("#f-morning-weight").value = onDate ? onDate.kg : "";
   let trend = "";
   if (s) {
     const sw = seriesWeights(s);
@@ -184,13 +231,13 @@ function renderWeightCard() {
 $("#save-weight-btn").addEventListener("click", async () => {
   const kg = Number($("#f-morning-weight").value);
   if (!kg || kg < 30) return;
-  let s = activeSeries();
+  let s = seriesForDate(logDate);
   if (!s) {
-    s = { id: Data.newId(), name: "Scale", start: todayStr(), legacy: false };
+    s = { id: Data.newId(), name: "Scale", start: logDate, legacy: false };
     await Data.series.put(s);
     series.push(s);
   }
-  const w = { date: todayStr(), kg, series: s.id };
+  const w = { date: logDate, kg, series: s.id };
   await Data.weights.put(w);
   weights = weights.filter((x) => x.date !== w.date).concat(w);
   renderToday();
@@ -818,7 +865,7 @@ $("#save-meal-btn").addEventListener("click", async () => {
     entry = { ...old, items: plainItems, totals: entryTotals(plainItems) };
   } else {
     entry = {
-      id: entryId, date: todayStr(),
+      id: entryId, date: logDate,
       time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
       items: plainItems, totals: entryTotals(plainItems),
     };
@@ -966,6 +1013,7 @@ function renderTdeeCard() {
 const WEEKDAYS = [["Mon", 1], ["Tue", 2], ["Wed", 3], ["Thu", 4], ["Fri", 5], ["Sat", 6], ["Sun", 0]];
 
 function renderSettings() {
+  if (!$("#recipe-builder").hidden) closeRecipeBuilder();
   // API key
   const key = localStorage.getItem("caltrack_api_key");
   $("#key-status").textContent = key ? `Key saved (…${key.slice(-4)})` : "No key yet — LLM features disabled until you add one.";
@@ -1035,6 +1083,137 @@ $("#save-profile-btn").addEventListener("click", async () => {
   await Data.saveProfile(profile);
   $("#settings-saved").hidden = false;
   setTimeout(() => ($("#settings-saved").hidden = true), 1500);
+});
+
+// ---------- recipe builder: combine saved ingredients into one food ----------
+let rbIngredients = [];
+
+function openRecipeBuilder() {
+  rbIngredients = [];
+  $("#rb-name").value = "";
+  $("#rb-grams").value = "";
+  $("#rb-total").value = "";
+  $("#recipe-builder").hidden = false;
+  $("#new-recipe-btn").hidden = true;
+  renderRecipeBuilder();
+}
+function closeRecipeBuilder() {
+  rbIngredients = [];
+  $("#recipe-builder").hidden = true;
+  $("#new-recipe-btn").hidden = false;
+}
+
+function renderRecipeBuilder() {
+  const sel = $("#rb-food");
+  const keep = sel.value;
+  sel.innerHTML = foods
+    .slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map((f) => `<option value="${f.id}">${esc(f.name)} — ${f.per_100g.kcal}/100g</option>`)
+    .join("") || `<option value="">no saved foods yet</option>`;
+  if (keep) sel.value = keep;
+
+  const wrap = $("#rb-ingredients");
+  wrap.innerHTML = rbIngredients.length
+    ? ""
+    : `<p class="hint">Add each ingredient by weight. Exact label data is used, so the result is exact too.</p>`;
+  rbIngredients.forEach((ing, i) => {
+    const row = document.createElement("div");
+    row.className = "ingredient-row";
+    row.innerHTML = `<span class="ing-name">${esc(ing.name)}</span>
+      <span>${ing.grams} g · ${Math.round(ing.kcal)} kcal</span>
+      <button class="del">✕</button>`;
+    row.querySelector(".del").addEventListener("click", () => {
+      rbIngredients.splice(i, 1);
+      syncBatchDefault();
+      renderRecipeBuilder();
+    });
+    wrap.appendChild(row);
+  });
+
+  const raw = rbIngredients.reduce(
+    (a, i) => ({ g: a.g + i.grams, kcal: a.kcal + i.kcal, p: a.p + i.protein_g, c: a.c + i.carbs_g, f: a.f + i.fat_g }),
+    { g: 0, kcal: 0, p: 0, c: 0, f: 0 }
+  );
+  $("#rb-totals").textContent = rbIngredients.length
+    ? `Ingredients: ${Math.round(raw.g)} g · ${Math.round(raw.kcal)} kcal · P ${r1(raw.p)} C ${r1(raw.c)} F ${r1(raw.f)}`
+    : "";
+
+  const totalG = Number($("#rb-total").value) || 0;
+  $("#rb-derived").textContent =
+    rbIngredients.length && totalG > 0
+      ? (() => {
+          const per = recipePer100g(rbIngredients, totalG);
+          return `Per 100 g: ${per.kcal} kcal · P ${per.protein_g} C ${per.carbs_g} F ${per.fat_g}`;
+        })()
+      : rbIngredients.length
+        ? "Enter the finished batch weight to derive per-100g values."
+        : "";
+}
+
+// Default the batch weight to the raw sum; the user lowers it for anything that
+// cooks down, which is what makes later portions accurate.
+function syncBatchDefault() {
+  const raw = Math.round(rbIngredients.reduce((s, i) => s + i.grams, 0));
+  const el = $("#rb-total");
+  if (!el.dataset.touched) el.value = raw || "";
+}
+
+$("#new-recipe-btn").addEventListener("click", openRecipeBuilder);
+$("#rb-cancel").addEventListener("click", closeRecipeBuilder);
+$("#rb-total").addEventListener("input", (e) => {
+  e.target.dataset.touched = "1";
+  renderRecipeBuilder();
+});
+$("#rb-add").addEventListener("click", () => {
+  const food = foods.find((f) => f.id === $("#rb-food").value);
+  const grams = Number($("#rb-grams").value);
+  if (!food) return alert("Save some foods first — scan a label, or save an item from a meal.");
+  if (!grams || grams <= 0) return alert("How many grams of that ingredient?");
+  const k = grams / 100;
+  rbIngredients.push({
+    name: food.name, food_id: food.id, grams,
+    kcal: r1(food.per_100g.kcal * k), protein_g: r1(food.per_100g.protein_g * k),
+    carbs_g: r1(food.per_100g.carbs_g * k), fat_g: r1(food.per_100g.fat_g * k),
+  });
+  $("#rb-grams").value = "";
+  syncBatchDefault();
+  renderRecipeBuilder();
+});
+$("#rb-save").addEventListener("click", async () => {
+  const name = $("#rb-name").value.trim();
+  const totalG = Number($("#rb-total").value);
+  if (!name) return alert("Give the recipe a name.");
+  if (rbIngredients.length < 2) return alert("Add at least two ingredients.");
+  if (!totalG || totalG <= 0) return alert("Enter the finished batch weight.");
+  // every ingredient came from the food DB, so the recipe inherits label accuracy
+  const allLabelled = rbIngredients.every((i) => {
+    const f = foods.find((x) => x.id === i.food_id);
+    return f && (f.basis === "label" || f.basis === "recipe");
+  });
+  const food = {
+    id: Data.newId(), name, aliases: [], basis: "recipe",
+    ingredients: rbIngredients.slice(), total_g: totalG,
+    per_100g: recipePer100g(rbIngredients, totalG),
+    unc: allLabelled ? UNC.weighed : 0.15,
+    note: `recipe built ${todayStr()}`, default_g: 100, last_used: todayStr(),
+  };
+  await Data.foods.put(food);
+  foods.push(food);
+  closeRecipeBuilder();
+  renderFoodsList();
+  const per = food.per_100g;
+  if (confirm(`Saved "${name}" — ${per.kcal} kcal/100 g.\n\nLog a portion of it now?`)) {
+    const grams = Number(prompt(`How many grams of ${name}?`, "230"));
+    if (grams > 0) {
+      scanItems = [foodToScanItem(food, grams)];
+      scanQuestion = null;
+      editingEntryId = null;
+      editingPrevItems = null;
+      startScanView();
+      $("#scan-notes").textContent = "";
+      openReview();
+    }
+  }
 });
 
 let expandedFoodId = null;
@@ -1190,6 +1369,7 @@ async function reloadCaches() {
     console.error(e);
     alert("Storage init failed: " + e.message);
   }
+  logDate = todayStr();
   const hasKey = !!localStorage.getItem("caltrack_api_key");
   showView(hasKey ? "today" : "settings");
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
