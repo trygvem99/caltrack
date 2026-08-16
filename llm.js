@@ -202,5 +202,36 @@ question: one further question ONLY if the correction itself is genuinely ambigu
     return call({ system: REVISE_SYSTEM, content: [{ type: "text", text }], schema: REVISE_SCHEMA, maxTokens: 2500 });
   }
 
-  return { analyzePhoto, analyzeLabel, parseText, reviseItems, MODEL };
+  // ---------- single ingredient the user has never saved ----------
+  const INGREDIENT_SCHEMA = {
+    type: "object", additionalProperties: false,
+    required: ["name", "per_100g", "note"],
+    properties: {
+      name: { type: "string" },
+      per_100g: {
+        type: "object", additionalProperties: false,
+        required: ["kcal", "protein_g", "carbs_g", "fat_g"],
+        properties: { kcal: NUM, protein_g: NUM, carbs_g: NUM, fat_g: NUM },
+      },
+      note: { type: "string" },
+    },
+  };
+
+  const INGREDIENT_SYSTEM = `Give standard reference nutrition values per 100 g for one named ingredient.
+
+- Use well-established composition data for the ingredient as commonly sold. These are reference values, not a guess about a photo, so they should be close to what any nutrition table would say.
+- Assume the raw/as-sold form unless the name says otherwise ("cooked rice", "fried onion").
+- name: tidy up the user's wording into a clear ingredient name.
+- note: one short sentence naming the assumption you made (form, fat percentage, variety), or an empty string if there was nothing to assume.`;
+
+  function estimateIngredient(name) {
+    return call({
+      system: INGREDIENT_SYSTEM,
+      content: [{ type: "text", text: "Ingredient: " + name }],
+      schema: INGREDIENT_SCHEMA,
+      maxTokens: 700,
+    });
+  }
+
+  return { analyzePhoto, analyzeLabel, parseText, reviseItems, estimateIngredient, MODEL };
 })();

@@ -182,4 +182,13 @@ details summary { cursor: pointer; margin: 6px 0; }
 #rb-ingredients .ingredient-row { justify-content: space-between; }
 #rb-ingredients .ing-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #rb-food { flex: 1 1 auto; min-width: 0; margin-top: 0; }
-#rb-grams { flex: 0 0 72px; width: 72px; margin-top: 0; }
+#rb-grams, #rb-custom-grams { flex: 0 0 64px; width: 64px; margin-top: 0; }
+#rb-custom-name { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+.tiny-label { font-size: 12px; margin: 12px 0 2px; text-transform: uppercase; letter-spacing: 0.4px; }
+.checkline { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 6px 0; }
+.checkline input { width: auto; margin: 0; flex: 0 0 auto; }
+.chip.est { color: #eab308; }
+/* labels and buttons share this row; the generic `label` margin made them
+   different heights, so normalise both to the same box */
+.fab-row .fab { margin: 0; display: flex; align-items: center; justify-content: center; }
+.fab-row .fab.secondary { padding: 14px 12px; }

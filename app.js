@@ -1093,6 +1093,12 @@ function openRecipeBuilder() {
   $("#rb-name").value = "";
   $("#rb-grams").value = "";
   $("#rb-total").value = "";
+  delete $("#rb-total").dataset.touched;
+  $("#rb-custom-name").value = "";
+  $("#rb-custom-grams").value = "";
+  ["#rb-m-kcal", "#rb-m-p", "#rb-m-c", "#rb-m-f"].forEach((sel) => ($(sel).value = ""));
+  $("#rb-manual").hidden = true;
+  $("#rb-manual-toggle").textContent = "or type the values myself";
   $("#recipe-builder").hidden = false;
   $("#new-recipe-btn").hidden = true;
   renderRecipeBuilder();
@@ -1119,7 +1125,7 @@ function renderRecipeBuilder() {
   rbIngredients.forEach((ing, i) => {
     const row = document.createElement("div");
     row.className = "ingredient-row";
-    row.innerHTML = `<span class="ing-name">${esc(ing.name)}</span>
+    row.innerHTML = `<span class="ing-name">${esc(ing.name)}${ing.estimated ? ' <span class="chip est">est</span>' : ""}</span>
       <span>${ing.grams} g · ${Math.round(ing.kcal)} kcal</span>
       <button class="del">✕</button>`;
     row.querySelector(".del").addEventListener("click", () => {
@@ -1160,6 +1166,84 @@ function syncBatchDefault() {
 
 $("#new-recipe-btn").addEventListener("click", openRecipeBuilder);
 $("#rb-cancel").addEventListener("click", closeRecipeBuilder);
+// Reachable straight from Today — building a recipe is a cooking-time action,
+// not a settings chore.
+$("#recipe-shortcut-btn").addEventListener("click", () => {
+  showView("settings");
+  openRecipeBuilder();
+  $("#recipe-builder").scrollIntoView({ behavior: "smooth", block: "center" });
+  $("#rb-name").focus();
+});
+$("#rb-manual-toggle").addEventListener("click", () => {
+  const box = $("#rb-manual");
+  box.hidden = !box.hidden;
+  $("#rb-manual-toggle").textContent = box.hidden ? "or type the values myself" : "look it up for me instead";
+});
+
+// Ingredients that were never saved: looked up once, then optionally kept so
+// they become an exact pick next time.
+$("#rb-custom-add").addEventListener("click", async () => {
+  const name = $("#rb-custom-name").value.trim();
+  const grams = Number($("#rb-custom-grams").value);
+  if (!name) return alert("Name the ingredient first.");
+  if (!grams || grams <= 0) return alert("How many grams of it?");
+
+  const manualOpen = !$("#rb-manual").hidden;
+  const typedKcal = Number($("#rb-m-kcal").value);
+  let per100, note = "", tidyName = name;
+
+  if (manualOpen && typedKcal > 0) {
+    per100 = {
+      kcal: typedKcal,
+      protein_g: Number($("#rb-m-p").value) || 0,
+      carbs_g: Number($("#rb-m-c").value) || 0,
+      fat_g: Number($("#rb-m-f").value) || 0,
+    };
+  } else if (manualOpen) {
+    return alert("Enter at least kcal per 100 g, or switch back to looking it up.");
+  } else {
+    const btn = $("#rb-custom-add");
+    const label = btn.textContent;
+    btn.textContent = "…"; btn.disabled = true;
+    try {
+      const r = await LLM.estimateIngredient(name);
+      per100 = r.per_100g;
+      note = r.note || "";
+      tidyName = r.name || name;
+    } catch (e) {
+      btn.textContent = label; btn.disabled = false;
+      return alert(`Could not look that up: ${e.message}\n\nTap "or type the values myself" to enter it by hand.`);
+    }
+    btn.textContent = label; btn.disabled = false;
+  }
+
+  const k = grams / 100;
+  rbIngredients.push({
+    name: tidyName, food_id: null, grams, estimated: true,
+    kcal: r1(per100.kcal * k), protein_g: r1(per100.protein_g * k),
+    carbs_g: r1(per100.carbs_g * k), fat_g: r1(per100.fat_g * k),
+  });
+
+  if ($("#rb-save-ingredient").checked) {
+    const food = {
+      id: Data.newId(), name: tidyName, aliases: [], per_100g: per100,
+      basis: "estimate", unc: 0.15,
+      note: note || `reference values ${todayStr()}`,
+      default_g: grams, last_used: todayStr(),
+    };
+    await Data.foods.put(food);
+    foods.push(food);
+    // keep the just-added ingredient pointing at the saved food
+    rbIngredients[rbIngredients.length - 1].food_id = food.id;
+  }
+
+  $("#rb-custom-name").value = "";
+  $("#rb-custom-grams").value = "";
+  ["#rb-m-kcal", "#rb-m-p", "#rb-m-c", "#rb-m-f"].forEach((s) => ($(s).value = ""));
+  syncBatchDefault();
+  renderRecipeBuilder();
+  if (note) $("#rb-derived").textContent = `Added ${tidyName} — ${note}`;
+});
 $("#rb-total").addEventListener("input", (e) => {
   e.target.dataset.touched = "1";
   renderRecipeBuilder();
@@ -1187,6 +1271,7 @@ $("#rb-save").addEventListener("click", async () => {
   if (!totalG || totalG <= 0) return alert("Enter the finished batch weight.");
   // every ingredient came from the food DB, so the recipe inherits label accuracy
   const allLabelled = rbIngredients.every((i) => {
+    if (i.estimated) return false;
     const f = foods.find((x) => x.id === i.food_id);
     return f && (f.basis === "label" || f.basis === "recipe");
   });

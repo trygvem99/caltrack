@@ -68,7 +68,8 @@
         <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
         <label class="fab secondary" for="label-input">🏷 Label</label>
         <input type="file" id="label-input" accept="image/*" capture="environment" hidden />
-        <button class="fab secondary" id="manual-meal-btn">＋</button>
+        <button class="fab secondary" id="recipe-shortcut-btn" title="Build a recipe">🥣</button>
+        <button class="fab secondary" id="manual-meal-btn" title="Add manually">＋</button>
       </div>
     </section>
 
@@ -165,11 +166,34 @@
         <div id="recipe-builder" hidden>
           <label>Recipe name<input type="text" id="rb-name" placeholder="e.g. Pancake batter" /></label>
           <div id="rb-ingredients"></div>
+          <p class="hint tiny-label">From your saved foods — exact</p>
           <div class="revise-row">
             <select id="rb-food"></select>
             <input type="number" id="rb-grams" min="0" placeholder="g" inputmode="decimal" />
             <button class="btn small" id="rb-add">Add</button>
           </div>
+
+          <p class="hint tiny-label">Anything else — looked up for you</p>
+          <div class="revise-row">
+            <input type="text" id="rb-custom-name" placeholder="e.g. plain flour" />
+            <input type="number" id="rb-custom-grams" min="0" placeholder="g" inputmode="decimal" />
+            <button class="btn small" id="rb-custom-add">Add</button>
+          </div>
+          <label class="checkline">
+            <input type="checkbox" id="rb-save-ingredient" checked />
+            Also save it to my foods, so it is a pick next time
+          </label>
+          <button class="linkish tiny" id="rb-manual-toggle">or type the values myself</button>
+          <div id="rb-manual" hidden>
+            <p class="hint">Per 100 g:</p>
+            <div class="field-grid">
+              <label>kcal<input type="number" id="rb-m-kcal" step="0.1" /></label>
+              <label>P<input type="number" id="rb-m-p" step="0.1" /></label>
+              <label>C<input type="number" id="rb-m-c" step="0.1" /></label>
+              <label>F<input type="number" id="rb-m-f" step="0.1" /></label>
+            </div>
+          </div>
+
           <p class="hint" id="rb-totals"></p>
           <label>Final weight of the finished batch (g)
             <input type="number" id="rb-total" min="0" inputmode="decimal" />
