@@ -1086,14 +1086,21 @@ $("#save-profile-btn").addEventListener("click", async () => {
 });
 
 // ---------- recipe builder: combine saved ingredients into one food ----------
+// Doubles as the recipe editor — same controls, so a recipe can be reworked
+// exactly the way it was built (add, remove, re-weigh, change the batch).
 let rbIngredients = [];
+let rbEditingId = null;
 
-function openRecipeBuilder() {
-  rbIngredients = [];
-  $("#rb-name").value = "";
+function openRecipeBuilder(existing) {
+  rbEditingId = existing ? existing.id : null;
+  rbIngredients = existing ? JSON.parse(JSON.stringify(existing.ingredients || [])) : [];
+  $("#rb-heading").textContent = existing ? "Edit recipe" : "New recipe";
+  $("#rb-save").textContent = existing ? "Save changes" : "Save recipe";
+  $("#rb-name").value = existing ? existing.name : "";
   $("#rb-grams").value = "";
-  $("#rb-total").value = "";
-  delete $("#rb-total").dataset.touched;
+  $("#rb-total").value = existing ? existing.total_g : "";
+  if (existing) $("#rb-total").dataset.touched = "1";
+  else delete $("#rb-total").dataset.touched;
   $("#rb-custom-name").value = "";
   $("#rb-custom-grams").value = "";
   ["#rb-m-kcal", "#rb-m-p", "#rb-m-c", "#rb-m-f"].forEach((sel) => ($(sel).value = ""));
@@ -1105,6 +1112,7 @@ function openRecipeBuilder() {
 }
 function closeRecipeBuilder() {
   rbIngredients = [];
+  rbEditingId = null;
   $("#recipe-builder").hidden = true;
   $("#new-recipe-btn").hidden = false;
 }
@@ -1275,18 +1283,30 @@ $("#rb-save").addEventListener("click", async () => {
     const f = foods.find((x) => x.id === i.food_id);
     return f && (f.basis === "label" || f.basis === "recipe");
   });
+  const prev = rbEditingId ? foods.find((f) => f.id === rbEditingId) : null;
   const food = {
-    id: Data.newId(), name, aliases: [], basis: "recipe",
+    // editing keeps the id, so anything already pointing at this recipe still resolves
+    id: prev ? prev.id : Data.newId(),
+    name, aliases: prev ? prev.aliases || [] : [], basis: "recipe",
     ingredients: rbIngredients.slice(), total_g: totalG,
     per_100g: recipePer100g(rbIngredients, totalG),
     unc: allLabelled ? UNC.weighed : 0.15,
-    note: `recipe built ${todayStr()}`, default_g: 100, last_used: todayStr(),
+    note: prev ? `${prev.note || "recipe"} · edited ${todayStr()}` : `recipe built ${todayStr()}`,
+    default_g: prev ? prev.default_g || 100 : 100,
+    last_used: prev ? prev.last_used : todayStr(),
   };
   await Data.foods.put(food);
-  foods.push(food);
+  if (prev) foods = foods.map((f) => (f.id === food.id ? food : f));
+  else foods.push(food);
+  const wasEditing = !!prev;
   closeRecipeBuilder();
+  expandedFoodId = wasEditing ? food.id : null;
   renderFoodsList();
   const per = food.per_100g;
+  if (wasEditing) {
+    alert(`Updated "${name}" — now ${per.kcal} kcal/100 g.\n\nMeals already logged keep the numbers they were saved with.`);
+    return;
+  }
   if (confirm(`Saved "${name}" — ${per.kcal} kcal/100 g.\n\nLog a portion of it now?`)) {
     const grams = Number(prompt(`How many grams of ${name}?`, "230"));
     if (grams > 0) {
@@ -1310,8 +1330,9 @@ function renderFoodsList() {
   for (const f of sorted) {
     const row = document.createElement("div");
     row.className = "food-row";
+    const nIng = f.basis === "recipe" ? (f.ingredients || []).length : 0;
     row.innerHTML = `
-      <span class="f-name">${esc(f.name)}</span>
+      <span class="f-name">${esc(f.name)}${nIng ? `<span class="ing-count">${nIng} ingredients</span>` : ""}</span>
       <span class="chip ${f.basis === "label" ? "label" : f.basis === "recipe" ? "weighed" : "recalled"}">${f.basis}</span>
       <span class="f-kcal">${f.per_100g.kcal}/100g</span>
       <button class="del">✕</button>`;
@@ -1326,61 +1347,98 @@ function renderFoodsList() {
       renderFoodsList();
     });
     wrap.appendChild(row);
-    if (expandedFoodId === f.id) wrap.appendChild(foodEditor(f));
+    if (expandedFoodId === f.id) {
+      wrap.appendChild(f.basis === "recipe" ? recipeDetail(f) : foodEditor(f));
+    }
   }
 }
 
+// What a recipe actually is: the ingredients, what each contributes, and how
+// much the batch weighs. Macros alone tell you nothing about how to change it.
+function recipeDetail(f) {
+  const div = document.createElement("div");
+  div.className = "food-editor recipe-detail";
+  const ings = f.ingredients || [];
+  const rawG = ings.reduce((s, i) => s + i.grams, 0);
+  const totalKcal = ings.reduce((s, i) => s + i.kcal, 0);
+  const per = f.per_100g;
+  const cooked = f.total_g && rawG ? Math.round(((rawG - f.total_g) / rawG) * 100) : 0;
+
+  div.innerHTML = `
+    <table class="ing-table">
+      <tbody>
+        ${ings.map((i) => `
+          <tr>
+            <td class="it-name">${esc(i.name)}${i.estimated ? ' <span class="chip est">est</span>' : ""}</td>
+            <td class="it-g">${i.grams} g</td>
+            <td class="it-k">${Math.round(i.kcal)} kcal</td>
+            <td class="it-pct">${totalKcal ? Math.round((i.kcal / totalKcal) * 100) : 0}%</td>
+          </tr>`).join("")}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td class="it-name">Ingredients</td>
+          <td class="it-g">${Math.round(rawG)} g</td>
+          <td class="it-k">${Math.round(totalKcal)} kcal</td>
+          <td class="it-pct"></td>
+        </tr>
+      </tfoot>
+    </table>
+    <p class="hint">
+      Finished batch <b>${f.total_g} g</b>${cooked > 0 ? ` — lost ${cooked}% to cooking` : ""}<br />
+      Per 100 g: <b>${per.kcal} kcal</b> · P ${per.protein_g} · C ${per.carbs_g} · F ${per.fat_g}<br />
+      Accuracy ±${Math.round((f.unc ?? 0.05) * 100)}%${f.note ? ` · ${esc(f.note)}` : ""}
+    </p>
+    <div class="btn-row">
+      <button class="btn small primary" data-a="edit">Edit recipe</button>
+      <button class="btn small" data-a="log">Log a portion</button>
+    </div>`;
+
+  div.querySelector('[data-a="edit"]').addEventListener("click", () => {
+    openRecipeBuilder(f);
+    $("#recipe-builder").scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+  div.querySelector('[data-a="log"]').addEventListener("click", () => {
+    const grams = Number(prompt(`How many grams of ${f.name}?`, String(f.default_g || 100)));
+    if (!grams || grams <= 0) return;
+    scanItems = [foodToScanItem(f, grams)];
+    scanQuestion = null;
+    editingEntryId = null;
+    editingPrevItems = null;
+    startScanView();
+    $("#scan-notes").textContent = "";
+    openReview();
+  });
+  return div;
+}
+
+// Non-recipe foods only; recipes are handled by recipeDetail + the builder.
 function foodEditor(f) {
   const div = document.createElement("div");
   div.className = "food-editor";
   const per = f.per_100g;
-  let ingHtml = "";
-  if (f.basis === "recipe") {
-    ingHtml = `<p class="hint">Ingredients (edit grams; per-100g recomputes):</p>` +
-      (f.ingredients || []).map((ing, i) =>
-        `<div class="ingredient-row"><span>${esc(ing.name)}</span><input type="number" data-ing="${i}" value="${ing.grams}" /> g <span>(${Math.round(ing.kcal)} kcal)</span></div>`
-      ).join("") +
-      `<label>Total batch weight (g)<input type="number" id="fe-total" value="${f.total_g}" /></label>`;
-  }
   div.innerHTML = `
     <label>Name<input type="text" id="fe-name" value="${esc(f.name)}" /></label>
     <label>Aliases (comma-separated)<input type="text" id="fe-aliases" value="${esc((f.aliases || []).join(", "))}" /></label>
-    ${f.basis !== "recipe" ? `
     <p class="hint">Per 100 g:</p>
     <div class="field-grid">
       <label>kcal<input type="number" id="fe-kcal" step="0.1" value="${per.kcal}" /></label>
       <label>P<input type="number" id="fe-p" step="0.1" value="${per.protein_g}" /></label>
       <label>C<input type="number" id="fe-c" step="0.1" value="${per.carbs_g}" /></label>
       <label>F<input type="number" id="fe-f" step="0.1" value="${per.fat_g}" /></label>
-    </div>` : ingHtml}
+    </div>
     <label>Default portion (g)<input type="number" id="fe-default" value="${f.default_g || 100}" /></label>
     <button class="btn small primary" id="fe-save">Save food</button>`;
   div.querySelector("#fe-save").addEventListener("click", async () => {
     f.name = div.querySelector("#fe-name").value.trim() || f.name;
     f.aliases = div.querySelector("#fe-aliases").value.split(",").map((s) => s.trim()).filter(Boolean);
     f.default_g = Number(div.querySelector("#fe-default").value) || f.default_g;
-    if (f.basis === "recipe") {
-      div.querySelectorAll("[data-ing]").forEach((inp) => {
-        const i = Number(inp.dataset.ing);
-        const ing = f.ingredients[i];
-        const g = Number(inp.value) || ing.grams;
-        if (g !== ing.grams && ing.grams > 0) {
-          const k = g / ing.grams;
-          ing.kcal = r1(ing.kcal * k); ing.protein_g = r1(ing.protein_g * k);
-          ing.carbs_g = r1(ing.carbs_g * k); ing.fat_g = r1(ing.fat_g * k);
-          ing.grams = g;
-        }
-      });
-      f.total_g = Number(div.querySelector("#fe-total").value) || f.total_g;
-      f.per_100g = recipePer100g(f.ingredients, f.total_g);
-    } else {
-      f.per_100g = {
-        kcal: Number(div.querySelector("#fe-kcal").value) || 0,
-        protein_g: Number(div.querySelector("#fe-p").value) || 0,
-        carbs_g: Number(div.querySelector("#fe-c").value) || 0,
-        fat_g: Number(div.querySelector("#fe-f").value) || 0,
-      };
-    }
+    f.per_100g = {
+      kcal: Number(div.querySelector("#fe-kcal").value) || 0,
+      protein_g: Number(div.querySelector("#fe-p").value) || 0,
+      carbs_g: Number(div.querySelector("#fe-c").value) || 0,
+      fat_g: Number(div.querySelector("#fe-f").value) || 0,
+    };
     await Data.foods.put(f);
     expandedFoodId = null;
     renderFoodsList();

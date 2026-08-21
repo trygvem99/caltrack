@@ -188,6 +188,18 @@ details summary { cursor: pointer; margin: 6px 0; }
 .checkline { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 6px 0; }
 .checkline input { width: auto; margin: 0; flex: 0 0 auto; }
 .chip.est { color: #eab308; }
+.food-row .f-name { display: flex; flex-direction: column; gap: 2px; }
+.ing-count { font-size: 11px; color: var(--dim); }
+.ing-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 4px 0 8px; }
+.ing-table td { padding: 5px 0; border-bottom: 1px solid var(--line); }
+.ing-table tfoot td { border-bottom: none; border-top: 1px solid var(--line); color: var(--dim); }
+.ing-table .it-name { color: var(--text); }
+.ing-table .it-g, .ing-table .it-k, .ing-table .it-pct {
+  text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--dim);
+  padding-left: 10px;
+}
+.ing-table .it-pct { width: 38px; }
+.recipe-detail .btn-row { margin-top: 4px; }
 /* labels and buttons share this row; the generic `label` margin made them
    different heights, so normalise both to the same box */
 .fab-row .fab { margin: 0; display: flex; align-items: center; justify-content: center; }
