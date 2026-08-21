@@ -200,6 +200,12 @@ details summary { cursor: pointer; margin: 6px 0; }
 }
 .ing-table .it-pct { width: 38px; }
 .recipe-detail .btn-row { margin-top: 4px; }
+.filter-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; }
+.chip.filter { border: 1px solid var(--line); cursor: pointer; padding: 5px 11px; font-size: 12px; }
+.chip.filter.active { background: var(--accent-dark); border-color: var(--accent-dark); color: #fff; }
+#foods-search, #rb-search { margin-top: 8px; }
+#foods-count { margin: 4px 0 0; }
+input[type="search"]::-webkit-search-cancel-button { filter: invert(0.6); }
 /* labels and buttons share this row; the generic `label` margin made them
    different heights, so normalise both to the same box */
 .fab-row .fab { margin: 0; display: flex; align-items: center; justify-content: center; }

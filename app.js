@@ -1014,6 +1014,9 @@ const WEEKDAYS = [["Mon", 1], ["Tue", 2], ["Wed", 3], ["Thu", 4], ["Fri", 5], ["
 
 function renderSettings() {
   if (!$("#recipe-builder").hidden) closeRecipeBuilder();
+  $("#foods-search").value = "";
+  foodsFilterBasis = "";
+  document.querySelectorAll("#foods-filters .chip").forEach((c) => c.classList.toggle("active", c.dataset.basis === ""));
   // API key
   const key = localStorage.getItem("caltrack_api_key");
   $("#key-status").textContent = key ? `Key saved (…${key.slice(-4)})` : "No key yet — LLM features disabled until you add one.";
@@ -1101,6 +1104,7 @@ function openRecipeBuilder(existing) {
   $("#rb-total").value = existing ? existing.total_g : "";
   if (existing) $("#rb-total").dataset.touched = "1";
   else delete $("#rb-total").dataset.touched;
+  $("#rb-search").value = "";
   $("#rb-custom-name").value = "";
   $("#rb-custom-grams").value = "";
   ["#rb-m-kcal", "#rb-m-p", "#rb-m-c", "#rb-m-f"].forEach((sel) => ($(sel).value = ""));
@@ -1120,11 +1124,15 @@ function closeRecipeBuilder() {
 function renderRecipeBuilder() {
   const sel = $("#rb-food");
   const keep = sel.value;
-  sel.innerHTML = foods
-    .slice().sort((a, b) => a.name.localeCompare(b.name))
-    .map((f) => `<option value="${f.id}">${esc(f.name)} — ${f.per_100g.kcal}/100g</option>`)
-    .join("") || `<option value="">no saved foods yet</option>`;
-  if (keep) sel.value = keep;
+  const q = ($("#rb-search").value || "").trim().toLowerCase();
+  const pool = foods
+    .filter((f) => foodMatchesQuery(f, q))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  sel.innerHTML = pool.length
+    ? pool.map((f) => `<option value="${f.id}">${esc(f.name)} — ${f.per_100g.kcal}/100g</option>`).join("")
+    : `<option value="">${foods.length ? "no match" : "no saved foods yet"}</option>`;
+  // keep the current pick only while it survives the filter
+  if (keep && pool.some((f) => f.id === keep)) sel.value = keep;
 
   const wrap = $("#rb-ingredients");
   wrap.innerHTML = rbIngredients.length
@@ -1182,6 +1190,7 @@ $("#recipe-shortcut-btn").addEventListener("click", () => {
   $("#recipe-builder").scrollIntoView({ behavior: "smooth", block: "center" });
   $("#rb-name").focus();
 });
+$("#rb-search").addEventListener("input", renderRecipeBuilder);
 $("#rb-manual-toggle").addEventListener("click", () => {
   const box = $("#rb-manual");
   box.hidden = !box.hidden;
@@ -1259,7 +1268,11 @@ $("#rb-total").addEventListener("input", (e) => {
 $("#rb-add").addEventListener("click", () => {
   const food = foods.find((f) => f.id === $("#rb-food").value);
   const grams = Number($("#rb-grams").value);
-  if (!food) return alert("Save some foods first — scan a label, or save an item from a meal.");
+  if (!food) {
+    return alert(foods.length
+      ? "Nothing is selected — clear the filter above, or pick an ingredient from the list."
+      : "Save some foods first — scan a label, or save an item from a meal.");
+  }
   if (!grams || grams <= 0) return alert("How many grams of that ingredient?");
   const k = grams / 100;
   rbIngredients.push({
@@ -1322,11 +1335,42 @@ $("#rb-save").addEventListener("click", async () => {
 });
 
 let expandedFoodId = null;
+let foodsFilterBasis = "";
+
+// Matches name, aliases, and — for recipes — the ingredients inside, so
+// "butter" finds every recipe containing butter, not just a food called that.
+function foodMatchesQuery(f, q) {
+  if (!q) return true;
+  const hay = [
+    f.name,
+    ...(f.aliases || []),
+    ...((f.ingredients || []).map((i) => i.name)),
+  ].join(" ").toLowerCase();
+  return q.split(/\s+/).filter(Boolean).every((term) => hay.includes(term));
+}
+
 function renderFoodsList() {
   const wrap = $("#foods-list");
   wrap.innerHTML = "";
-  const sorted = foods.slice().sort((a, b) => a.name.localeCompare(b.name));
-  if (!sorted.length) { wrap.innerHTML = `<p class="hint">No foods yet — save items from the review screen or scan a label.</p>`; return; }
+  if (!foods.length) {
+    $("#foods-count").textContent = "";
+    wrap.innerHTML = `<p class="hint">No foods yet — save items from the review screen or scan a label.</p>`;
+    return;
+  }
+  const q = ($("#foods-search").value || "").trim().toLowerCase();
+  const sorted = foods
+    .filter((f) => (!foodsFilterBasis || f.basis === foodsFilterBasis) && foodMatchesQuery(f, q))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  $("#foods-count").textContent =
+    q || foodsFilterBasis
+      ? `${sorted.length} of ${foods.length} foods`
+      : `${foods.length} foods`;
+
+  if (!sorted.length) {
+    wrap.innerHTML = `<p class="hint">Nothing matches${q ? ` “${esc(q)}”` : ""}.</p>`;
+    return;
+  }
   for (const f of sorted) {
     const row = document.createElement("div");
     row.className = "food-row";
@@ -1352,6 +1396,19 @@ function renderFoodsList() {
     }
   }
 }
+
+$("#foods-search").addEventListener("input", () => {
+  expandedFoodId = null; // a stale expansion under a filtered list is confusing
+  renderFoodsList();
+});
+$("#foods-filters").addEventListener("click", (e) => {
+  const btn = e.target.closest(".chip.filter");
+  if (!btn) return;
+  foodsFilterBasis = btn.dataset.basis;
+  document.querySelectorAll("#foods-filters .chip").forEach((c) => c.classList.toggle("active", c === btn));
+  expandedFoodId = null;
+  renderFoodsList();
+});
 
 // What a recipe actually is: the ingredients, what each contributes, and how
 // much the batch weighs. Macros alone tell you nothing about how to change it.

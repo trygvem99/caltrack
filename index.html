@@ -162,12 +162,21 @@
 
       <div class="card">
         <h2>Foods</h2>
+        <input type="search" id="foods-search" placeholder="Search foods, aliases, ingredients…" autocomplete="off" />
+        <div class="filter-chips" id="foods-filters">
+          <button class="chip filter active" data-basis="">All</button>
+          <button class="chip filter" data-basis="label">Label</button>
+          <button class="chip filter" data-basis="recipe">Recipe</button>
+          <button class="chip filter" data-basis="estimate">Estimate</button>
+        </div>
+        <p class="hint" id="foods-count"></p>
         <button class="linkish" id="new-recipe-btn">＋ New recipe from saved ingredients</button>
         <div id="recipe-builder" hidden>
           <h3 id="rb-heading">New recipe</h3>
           <label>Recipe name<input type="text" id="rb-name" placeholder="e.g. Pancake batter" /></label>
           <div id="rb-ingredients"></div>
           <p class="hint tiny-label">From your saved foods — exact</p>
+          <input type="search" id="rb-search" placeholder="Filter ingredients…" autocomplete="off" />
           <div class="revise-row">
             <select id="rb-food"></select>
             <input type="number" id="rb-grams" min="0" placeholder="g" inputmode="decimal" />
