@@ -206,6 +206,13 @@ details summary { cursor: pointer; margin: 6px 0; }
 #foods-search, #rb-search { margin-top: 8px; }
 #foods-count { margin: 4px 0 0; }
 input[type="search"]::-webkit-search-cancel-button { filter: invert(0.6); }
+.ingredient-row .ing-g { width: 60px; margin-top: 0; padding: 5px 6px; font-size: 13px; flex: 0 0 60px; }
+.ingredient-row .ing-unit { color: var(--dim); margin-left: -4px; }
+.ingredient-row .ing-kcal { color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ingredient-row .del { padding: 4px; }
+#entry-when { margin: 10px 0 0; }
+#entry-when label { margin: 0; }
+#delete-weight-btn { color: var(--warn); }
 /* labels and buttons share this row; the generic `label` margin made them
    different heights, so normalise both to the same box */
 .fab-row .fab { margin: 0; display: flex; align-items: center; justify-content: center; }

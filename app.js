@@ -210,6 +210,9 @@ function renderWeightCard() {
   const onDate = weights.find((w) => w.date === logDate);
   $("#weight-label").textContent = onDate ? "Weight ✓" : "Morning weight";
   $("#f-morning-weight").value = onDate ? onDate.kg : "";
+  // A weigh-in on the wrong day skews the trend and cannot be fixed by
+  // overwriting, so it has to be removable.
+  $("#delete-weight-btn").hidden = !onDate;
   let trend = "";
   if (s) {
     const sw = seriesWeights(s);
@@ -240,6 +243,15 @@ $("#save-weight-btn").addEventListener("click", async () => {
   const w = { date: logDate, kg, series: s.id };
   await Data.weights.put(w);
   weights = weights.filter((x) => x.date !== w.date).concat(w);
+  renderToday();
+});
+
+$("#delete-weight-btn").addEventListener("click", async () => {
+  const w = weights.find((x) => x.date === logDate);
+  if (!w) return;
+  if (!confirm(`Remove the ${w.kg} kg weigh-in for ${prettyDate(logDate)}?`)) return;
+  await Data.weights.del(logDate);
+  weights = weights.filter((x) => x.date !== logDate);
   renderToday();
 });
 
@@ -476,6 +488,13 @@ function openReview() {
     $("#question-banner").hidden = true;
   }
   $("#save-meal-btn").textContent = editingEntryId ? "Update meal" : "Save meal";
+  const now = new Date();
+  const existing = editingEntryId ? log.find((e) => e.id === editingEntryId) : null;
+  $("#entry-date").value = existing ? existing.date : logDate;
+  $("#entry-date").max = todayStr();
+  $("#entry-time").value = existing
+    ? existing.time
+    : `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   fillFoodDatalist();
   renderScanItems();
 }
@@ -859,17 +878,18 @@ $("#save-meal-btn").addEventListener("click", async () => {
   }
 
   const plainItems = items.map((x) => x.saved);
+  const chosenDate = $("#entry-date").value || logDate;
+  const chosenTime = $("#entry-time").value ||
+    `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   let entry;
   if (editingEntryId) {
     const old = log.find((e) => e.id === editingEntryId);
-    entry = { ...old, items: plainItems, totals: entryTotals(plainItems) };
+    entry = { ...old, date: chosenDate, time: chosenTime, items: plainItems, totals: entryTotals(plainItems) };
   } else {
-    entry = {
-      id: entryId, date: logDate,
-      time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
-      items: plainItems, totals: entryTotals(plainItems),
-    };
+    entry = { id: entryId, date: chosenDate, time: chosenTime, items: plainItems, totals: entryTotals(plainItems) };
   }
+  // follow the meal to its day, so a re-dated entry never seems to vanish
+  if (chosenDate !== logDate) logDate = chosenDate;
   await Data.log.put(entry);
   log = log.filter((e) => e.id !== entry.id).concat(entry);
   editingEntryId = null;
@@ -1100,6 +1120,8 @@ function openRecipeBuilder(existing) {
   $("#rb-heading").textContent = existing ? "Edit recipe" : "New recipe";
   $("#rb-save").textContent = existing ? "Save changes" : "Save recipe";
   $("#rb-name").value = existing ? existing.name : "";
+  $("#rb-aliases").value = existing ? (existing.aliases || []).join(", ") : "";
+  $("#rb-default").value = existing ? existing.default_g || 100 : 100;
   $("#rb-grams").value = "";
   $("#rb-total").value = existing ? existing.total_g : "";
   if (existing) $("#rb-total").dataset.touched = "1";
@@ -1142,8 +1164,16 @@ function renderRecipeBuilder() {
     const row = document.createElement("div");
     row.className = "ingredient-row";
     row.innerHTML = `<span class="ing-name">${esc(ing.name)}${ing.estimated ? ' <span class="chip est">est</span>' : ""}</span>
-      <span>${ing.grams} g · ${Math.round(ing.kcal)} kcal</span>
+      <input type="number" class="ing-g" min="0" value="${ing.grams}" inputmode="decimal" /><span class="ing-unit">g</span>
+      <span class="ing-kcal">${Math.round(ing.kcal)} kcal</span>
       <button class="del">✕</button>`;
+    row.querySelector(".ing-g").addEventListener("change", (e) => {
+      const g = Number(e.target.value);
+      if (!g || g <= 0) { renderRecipeBuilder(); return; }
+      setIngredientGrams(ing, g);
+      syncBatchDefault();
+      renderRecipeBuilder();
+    });
     row.querySelector(".del").addEventListener("click", () => {
       rbIngredients.splice(i, 1);
       syncBatchDefault();
@@ -1170,6 +1200,27 @@ function renderRecipeBuilder() {
       : rbIngredients.length
         ? "Enter the finished batch weight to derive per-100g values."
         : "";
+}
+
+// Re-weigh an ingredient. When it is linked to a saved food, recompute from
+// that food's per-100g rather than scaling the stored numbers, so repeated
+// edits cannot drift away from the label.
+function setIngredientGrams(ing, grams) {
+  const food = ing.food_id ? foods.find((f) => f.id === ing.food_id) : null;
+  if (food) {
+    const k = grams / 100;
+    ing.kcal = r1(food.per_100g.kcal * k);
+    ing.protein_g = r1(food.per_100g.protein_g * k);
+    ing.carbs_g = r1(food.per_100g.carbs_g * k);
+    ing.fat_g = r1(food.per_100g.fat_g * k);
+  } else if (ing.grams > 0) {
+    const k = grams / ing.grams;
+    ing.kcal = r1(ing.kcal * k);
+    ing.protein_g = r1(ing.protein_g * k);
+    ing.carbs_g = r1(ing.carbs_g * k);
+    ing.fat_g = r1(ing.fat_g * k);
+  }
+  ing.grams = grams;
 }
 
 // Default the batch weight to the raw sum; the user lowers it for anything that
@@ -1300,12 +1351,14 @@ $("#rb-save").addEventListener("click", async () => {
   const food = {
     // editing keeps the id, so anything already pointing at this recipe still resolves
     id: prev ? prev.id : Data.newId(),
-    name, aliases: prev ? prev.aliases || [] : [], basis: "recipe",
+    name,
+    aliases: $("#rb-aliases").value.split(",").map((a) => a.trim()).filter(Boolean),
+    basis: "recipe",
     ingredients: rbIngredients.slice(), total_g: totalG,
     per_100g: recipePer100g(rbIngredients, totalG),
     unc: allLabelled ? UNC.weighed : 0.15,
     note: prev ? `${prev.note || "recipe"} · edited ${todayStr()}` : `recipe built ${todayStr()}`,
-    default_g: prev ? prev.default_g || 100 : 100,
+    default_g: Number($("#rb-default").value) || 100,
     last_used: prev ? prev.last_used : todayStr(),
   };
   await Data.foods.put(food);

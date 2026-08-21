@@ -34,6 +34,7 @@
           <span id="weight-label">Morning weight</span>
           <input type="number" id="f-morning-weight" min="30" max="300" step="0.1" placeholder="kg" inputmode="decimal" />
           <button class="btn small" id="save-weight-btn">Log</button>
+          <button class="btn small" id="delete-weight-btn" title="Remove this weigh-in" hidden>✕</button>
         </div>
         <div class="stat-sub" id="weight-trend"></div>
         <button class="linkish tiny" id="new-series-btn">new scale / location</button>
@@ -101,6 +102,10 @@
         </div>
         <p id="scan-notes" class="hint"></p>
         <div class="card totals" id="scan-totals"></div>
+        <div class="field-grid" id="entry-when">
+          <label>Date<input type="date" id="entry-date" /></label>
+          <label>Time<input type="time" id="entry-time" /></label>
+        </div>
         <div class="btn-row">
           <button class="btn primary" id="save-meal-btn">Save meal</button>
           <button class="btn" id="save-recipe-btn" hidden>Save as recipe</button>
@@ -209,6 +214,11 @@
             <input type="number" id="rb-total" min="0" inputmode="decimal" />
           </label>
           <p class="hint" id="rb-derived"></p>
+          <div class="field-grid">
+            <label>Usual portion (g)<input type="number" id="rb-default" min="0" inputmode="decimal" /></label>
+            <label>Aliases<input type="text" id="rb-aliases" placeholder="batter, pannekaker" /></label>
+          </div>
+          <p class="hint">Aliases are what you can type when logging — "230 g batter" only works if "batter" is one.</p>
           <div class="btn-row">
             <button class="btn primary" id="rb-save">Save recipe</button>
             <button class="btn" id="rb-cancel">Cancel</button>
