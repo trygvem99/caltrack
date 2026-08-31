@@ -47,6 +47,7 @@
           <div class="stat-head"><span>Calories</span><span id="kcal-nums">–</span></div>
           <div class="bar"><div id="kcal-bar" class="fill"></div></div>
           <div class="stat-sub" id="kcal-sub"></div>
+          <div class="cut-lines" id="cut-lines" hidden></div>
         </div>
         <div class="stat">
           <div class="stat-head"><span>Protein</span><span id="prot-nums">–</span></div>
@@ -115,6 +116,18 @@
       <datalist id="food-names"></datalist>
     </section>
 
+    <!-- shared searchable food picker -->
+    <div id="food-picker" class="overlay" hidden>
+      <div class="picker-panel">
+        <div class="revise-row">
+          <input type="search" id="fp-search" placeholder="Search foods, aliases, ingredients…" autocomplete="off" />
+          <button class="btn small" id="fp-cancel">Close</button>
+        </div>
+        <p class="hint" id="fp-count"></p>
+        <div id="fp-list"></div>
+      </div>
+    </div>
+
     <!-- HISTORY -->
     <section id="view-history" class="view" hidden>
       <div class="card" id="hist-weight-card"></div>
@@ -139,7 +152,13 @@
         <h2>Daily targets (kcal per weekday)</h2>
         <div class="weekday-grid" id="weekday-targets"></div>
         <label>Protein target (g)<input type="number" id="f-prot-target" min="40" max="400" /></label>
-        <label>Current TDEE (kcal)<input type="number" id="f-tdee" min="1000" max="6000" /></label>
+        <label>Current TDEE / maintenance (kcal)<input type="number" id="f-tdee" min="1000" max="6000" /></label>
+        <label class="checkline">
+          <input type="checkbox" id="f-cut-mode" />
+          <span><b>Cut mode</b> — show maintenance and a cut line 500 kcal below it, and add
+          <span id="cut-uplift-label">7.5</span>% to photo estimates of pastry and cakes</span>
+        </label>
+        <p class="hint" id="cut-mode-note"></p>
         <details class="hint">
           <summary>Suggest a starting TDEE (Mifflin-St Jeor)</summary>
           <div class="field-grid">

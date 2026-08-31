@@ -20,6 +20,9 @@ let editingEntryId = null;   // set when re-opening a saved entry
 let editingPrevItems = null; // snapshot for post-save correction diff
 
 const UNC = { label: 0.05, weighed: 0.05, photo: 0.25, recalled: 0.4, legacy: 0.3 };
+const CUT_DEFICIT = 500;   // kcal below maintenance
+const PASTRY_UPLIFT = 0.075; // pastry is reliably under-read from a photo
+const cutMode = () => !!profile?.cut_mode;
 const DEFAULT_TARGETS = [3050, 2500, 2500, 2500, 3050, 3050, 3050]; // getDay(): Sun..Sat
 
 // ---------- helpers ----------
@@ -120,6 +123,7 @@ function renderToday() {
     ? t.protein_g >= protTarget ? "Protein goal hit ✓" : `${Math.round(protTarget - t.protein_g)} g to go`
     : "";
 
+  renderCutLines(t.kcal);
   $("#tier-line").textContent = tierLine(logDate);
 
   const list = $("#meal-list");
@@ -164,6 +168,27 @@ $("#log-date").addEventListener("change", (e) => {
   else renderDateNav();
 });
 
+// Cut mode shows both reference lines for the day: maintenance (your measured
+// TDEE) and the cut line 500 kcal under it.
+function renderCutLines(eaten) {
+  const box = $("#cut-lines");
+  if (!cutMode()) { box.hidden = true; return; }
+  box.hidden = false;
+  const maint = profile?.tdee;
+  if (!maint) {
+    box.innerHTML = `<span class="hint">Set your maintenance (TDEE) in Settings to see the cut line — or let the weight trend work it out on History.</span>`;
+    return;
+  }
+  const cut = maint - CUT_DEFICIT;
+  const pill = (label, target) => {
+    const diff = target - eaten;
+    const under = diff >= 0;
+    return `<span class="cut-pill ${under ? "under" : "over"}">
+      ${label} <b>${target}</b> · ${under ? `${diff} left` : `${-diff} over`}</span>`;
+  };
+  box.innerHTML = pill("Maintenance", maint) + pill("Cut", cut);
+}
+
 function tierLine(date) {
   const items = dayEntries(date).flatMap((e) => e.items);
   const total = items.reduce((s, i) => s + i.kcal, 0);
@@ -193,8 +218,18 @@ function mealCard(e) {
         <span class="chip ${prov}">${prov}</span>${unresolved ? ' <span class="dot-unresolved">●</span>' : ""}</div>
     </div>
     <div class="m-kcal">${e.totals.kcal} kcal</div>
+    <button class="copy" title="${e.date === todayStr() ? "Log this again today" : "Copy to today"}">⧉</button>
     <button class="del" title="Delete meal">✕</button>`;
   div.querySelector(".m-info").addEventListener("click", () => openEntryForEdit(e));
+  div.querySelector(".copy").addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    const again = e.date === todayStr();
+    const msg = again
+      ? `Log "${e.items.map((i) => i.name).join(", ")}" again today?`
+      : `Copy this ${e.totals.kcal} kcal meal from ${prettyDate(e.date)} to today?`;
+    if (!confirm(msg)) return;
+    await copyEntryToToday(e);
+  });
   div.querySelector(".del").addEventListener("click", async (ev) => {
     ev.stopPropagation();
     if (!confirm("Delete this meal?")) return;
@@ -270,6 +305,68 @@ function renderBackupNag() {
   $("#backup-nag").hidden = !stale || log.length === 0;
 }
 
+// ---------- shared food picker ----------
+// One searchable list, used anywhere a food has to be chosen. A 30+ item
+// dropdown is unusable on a phone.
+let fpOnPick = null;
+
+function openFoodPicker(onPick) {
+  fpOnPick = onPick;
+  $("#fp-search").value = "";
+  $("#food-picker").hidden = false;
+  renderFoodPicker();
+  $("#fp-search").focus();
+}
+function closeFoodPicker() {
+  fpOnPick = null;
+  $("#food-picker").hidden = true;
+}
+function renderFoodPicker() {
+  const q = ($("#fp-search").value || "").trim().toLowerCase();
+  const hits = foods
+    .filter((f) => foodMatchesQuery(f, q))
+    .sort((a, b) => ((b.last_used || "") < (a.last_used || "") ? -1 : 1) || a.name.localeCompare(b.name));
+  $("#fp-count").textContent = foods.length
+    ? `${hits.length} of ${foods.length} foods${q ? "" : " · most recently used first"}`
+    : "No saved foods yet.";
+  const wrap = $("#fp-list");
+  wrap.innerHTML = "";
+  for (const f of hits) {
+    const row = document.createElement("button");
+    row.className = "fp-row";
+    row.innerHTML = `<span class="fp-name">${esc(f.name)}</span>
+      <span class="chip ${f.basis === "label" ? "label" : f.basis === "recipe" ? "weighed" : "recalled"}">${f.basis}</span>
+      <span class="f-kcal">${f.per_100g.kcal}/100g</span>`;
+    row.addEventListener("click", () => {
+      const cb = fpOnPick;
+      closeFoodPicker();
+      if (cb) cb(f);
+    });
+    wrap.appendChild(row);
+  }
+}
+$("#fp-search").addEventListener("input", renderFoodPicker);
+$("#fp-cancel").addEventListener("click", closeFoodPicker);
+$("#food-picker").addEventListener("click", (e) => {
+  if (e.target.id === "food-picker") closeFoodPicker();
+});
+
+// ---------- copy a meal onto another day ----------
+async function copyEntryToToday(e) {
+  const target = todayStr();
+  const when = new Date();
+  const copy = {
+    ...JSON.parse(JSON.stringify(e)),
+    id: Data.newId(),
+    date: target,
+    time: `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`,
+  };
+  await Data.log.put(copy);
+  log.push(copy);
+  logDate = target;
+  renderToday();
+}
+
 // ---------- scan / review ----------
 function startScanView() {
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
@@ -315,16 +412,24 @@ $("#photo-input").addEventListener("change", async (ev) => {
   try {
     const result = await LLM.analyzePhoto(base64);
     scanItems = (result.items || []).map((i) => {
+      // est stays the model's honest median. The pastry uplift is our policy,
+      // applied on top and recorded separately, so estimates stay auditable.
       const est = {
         portion_g: i.portion_g, kcal: i.kcal, kcal_low: i.kcal_low, kcal_high: i.kcal_high,
         protein_g: i.protein_g, carbs_g: i.carbs_g, fat_g: i.fat_g,
       };
       const unc = i.kcal > 0 ? r1(Math.max(0.05, (i.kcal_high - i.kcal_low) / (2 * i.kcal))) : UNC.photo;
+      const uplift = cutMode() && i.is_pastry ? 1 + PASTRY_UPLIFT : 1;
       return {
         name: i.name, grams: Math.round(i.portion_g),
-        base: { portion_g: i.portion_g, kcal: i.kcal, protein_g: i.protein_g, carbs_g: i.carbs_g, fat_g: i.fat_g },
+        base: {
+          portion_g: i.portion_g,
+          kcal: i.kcal * uplift, protein_g: i.protein_g * uplift,
+          carbs_g: i.carbs_g * uplift, fat_g: i.fat_g * uplift,
+        },
         est, provenance: "photo", unc, unresolved: !!i.hidden_factor,
         hidden_factor: i.hidden_factor || null, food_id: null, source: "model",
+        is_pastry: !!i.is_pastry, uplift: uplift > 1 ? uplift : null,
       };
     });
     scanQuestion = result.question || null;
@@ -643,12 +748,12 @@ function renderScanItems() {
         <button class="del" title="Remove">✕</button>
       </div>
       ${match ? `<button class="chip match" data-f="match">use saved: ${match.per_100g.kcal} kcal/100g</button>` : ""}
-      <select class="link-food ${it.food_id ? "linked" : ""}" data-f="linkfood">
-        <option value="">🔗 link a saved food…</option>
-        ${foods.slice().sort((a, b) => a.name.localeCompare(b.name))
-          .map((f) => `<option value="${f.id}" ${f.id === it.food_id ? "selected" : ""}>${esc(f.name)} — ${f.per_100g.kcal}/100g</option>`)
-          .join("")}
-      </select>
+      <button class="link-food ${it.food_id ? "linked" : ""}" data-f="linkfood">${
+        it.food_id
+          ? `🔗 ${esc((foods.find((f) => f.id === it.food_id) || {}).name || "linked food")}`
+          : "🔗 Search saved foods…"
+      }</button>
+      ${it.uplift ? `<div class="badge-uplift">+${Math.round((it.uplift - 1) * 1000) / 10}% pastry adjustment applied (cut mode)</div>` : ""}
       ${it.hidden_factor && it.unresolved ? `<div class="badge-hidden" data-f="hidden">● ${esc(it.hidden_factor)} — tap when resolved</div>` : ""}
       <div class="item-macros">
         <label>g <input type="number" min="0" value="${it.grams}" data-f="grams" /></label>
@@ -684,10 +789,9 @@ function renderScanItems() {
       const food = findFoodMatch(it.name);
       if (food) applyFood(food);
     });
-    div.querySelector('[data-f="linkfood"]').addEventListener("change", (e) => {
-      const food = foods.find((f) => f.id === e.target.value);
-      if (!food) { it.food_id = null; renderScanItems(); return; }
-      applyFood(food);
+    div.querySelector('[data-f="linkfood"]').addEventListener("click", () => {
+      if (!foods.length) return alert("No saved foods yet — scan a label, or save an item from a meal.");
+      openFoodPicker(applyFood);
     });
     const hiddenBadge = div.querySelector('[data-f="hidden"]');
     if (hiddenBadge) hiddenBadge.addEventListener("click", () => {
@@ -800,7 +904,7 @@ function openEntryForEdit(e) {
     base: { portion_g: i.portion_g, kcal: i.kcal, protein_g: i.protein_g, carbs_g: i.carbs_g, fat_g: i.fat_g },
     est: i.est || null, provenance: i.provenance || "photo", unc: i.unc ?? UNC.photo,
     unresolved: !!i.unresolved, hidden_factor: i.hidden_factor || null,
-    food_id: i.food_id || null, source: "model",
+    food_id: i.food_id || null, source: "model", uplift: i.uplift || null,
   }));
   scanQuestion = null;
   $("#scan-preview").src = "";
@@ -820,7 +924,7 @@ $("#save-meal-btn").addEventListener("click", async () => {
         kcal: Math.round(m.kcal), protein_g: r1(m.protein_g), carbs_g: r1(m.carbs_g), fat_g: r1(m.fat_g),
         provenance: it.provenance, unc: it.unc, unresolved: !!it.unresolved,
         corrected: false, food_id: it.food_id || null, hidden_factor: it.hidden_factor || null,
-        est: it.est || null,
+        est: it.est || null, uplift: it.uplift || null,
       };
       return { saved, meta: it };
     });
@@ -845,6 +949,16 @@ $("#save-meal-btn").addEventListener("click", async () => {
       const scaled = meta.est.kcal * (saved.portion_g / meta.est.portion_g);
       if (!(scaled > 0)) continue;
       if (Math.abs(saved.kcal - scaled) / scaled <= 0.02) continue;
+      // The pastry uplift is policy, not the user second-guessing the model.
+      // `scaled` is already the model's own figure — est is never uplifted —
+      // so it is the correct "from" value.
+      if (meta.uplift && !meta.food_id) {
+        toRecord.push({
+          ts: now.toISOString(), entry_id: entryId, item: saved.name,
+          kcal_from: Math.round(scaled), kcal_to: saved.kcal, phase: "pastry-uplift",
+        });
+        continue;
+      }
       const isDbMatch = meta.source === "db";
       // A spoken revision is recorded once at entry level below. Logging the
       // per-item deviation as well would count the same decision twice.
@@ -934,6 +1048,7 @@ function renderHistory() {
   // corrections asymmetry
   const judged = corrections.filter((c) => c.phase === "review" || c.phase === "post-save" || c.phase === "revision");
   const dbm = corrections.filter((c) => c.phase === "db-match").length;
+  const uplifts = corrections.filter((c) => c.phase === "pastry-uplift");
   if (judged.length) {
     const down = judged.filter((c) => c.kcal_to < c.kcal_from).length;
     const up = judged.length - down;
@@ -941,7 +1056,16 @@ function renderHistory() {
     let line = `${judged.length} corrections: ${net >= 0 ? "+" : ""}${net} kcal net, ${down} down / ${up} up`;
     if (judged.length >= 5 && (down === 0 || up === 0)) line += " — one-directional: check for bias";
     if (dbm) line += ` (+${dbm} db substitutions, excluded)`;
+    if (uplifts.length) {
+      const added = uplifts.reduce((sum, c) => sum + (c.kcal_to - c.kcal_from), 0);
+      line += ` · pastry rule added ${added} kcal over ${uplifts.length} item${uplifts.length === 1 ? "" : "s"}`;
+    }
     $("#hist-corrections").textContent = line;
+    $("#hist-corrections").hidden = false;
+  } else if (uplifts.length) {
+    const added = uplifts.reduce((sum, c) => sum + (c.kcal_to - c.kcal_from), 0);
+    $("#hist-corrections").textContent =
+      `No manual corrections yet · pastry rule added ${added} kcal over ${uplifts.length} item${uplifts.length === 1 ? "" : "s"}`;
     $("#hist-corrections").hidden = false;
   } else {
     $("#hist-corrections").hidden = true;
@@ -1048,6 +1172,8 @@ function renderSettings() {
   ).join("");
   $("#f-prot-target").value = profile?.protein_target ?? 160;
   $("#f-tdee").value = profile?.tdee ?? "";
+  $("#f-cut-mode").checked = !!profile?.cut_mode;
+  renderCutModeNote();
   if (profile?.mifflin) {
     $("#f-weight").value = profile.mifflin.weight || "";
     $("#f-height").value = profile.mifflin.height || "";
@@ -1093,6 +1219,7 @@ $("#save-profile-btn").addEventListener("click", async () => {
     kcal_targets: targets,
     protein_target: Number($("#f-prot-target").value) || 160,
     tdee: tdeeVal,
+    cut_mode: $("#f-cut-mode").checked,
     tdee_updated: tdeeVal && tdeeVal !== hadTdee ? todayStr() : profile?.tdee_updated ?? null,
     tdee_history: profile?.tdee_history || [],
     mifflin: {
@@ -1627,3 +1754,17 @@ async function reloadCaches() {
   showView(hasKey ? "today" : "settings");
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 })();
+
+// Explains what cut mode is currently doing, including the case where it is on
+// but cannot draw the lines yet.
+function renderCutModeNote() {
+  const on = $("#f-cut-mode").checked;
+  const maint = Number($("#f-tdee").value) || profile?.tdee || 0;
+  $("#cut-mode-note").textContent = !on
+    ? ""
+    : maint
+      ? `Maintenance ${maint} · cut ${maint - CUT_DEFICIT} kcal. Pastry photo estimates are raised ${PASTRY_UPLIFT * 100}%; the model's own figure is kept and the adjustment is shown on the item and on History.`
+      : "Cut mode is on, but there is no maintenance figure yet — set TDEE above, or let the weight trend derive it on History.";
+}
+$("#f-cut-mode").addEventListener("change", renderCutModeNote);
+$("#f-tdee").addEventListener("input", renderCutModeNote);

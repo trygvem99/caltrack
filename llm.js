@@ -42,12 +42,13 @@ const LLM = (() => {
   // ---------- photo scan ----------
   const PHOTO_ITEM = {
     type: "object", additionalProperties: false,
-    required: ["name", "portion_g", "kcal", "kcal_low", "kcal_high", "protein_g", "carbs_g", "fat_g", "hidden_factor"],
+    required: ["name", "portion_g", "kcal", "kcal_low", "kcal_high", "protein_g", "carbs_g", "fat_g", "hidden_factor", "is_pastry"],
     properties: {
       name: { type: "string" }, portion_g: NUM,
       kcal: NUM, kcal_low: NUM, kcal_high: NUM,
       protein_g: NUM, carbs_g: NUM, fat_g: NUM,
       hidden_factor: NULL_STR,
+      is_pastry: { type: "boolean" },
     },
   };
   const PHOTO_SCHEMA = {
@@ -66,6 +67,7 @@ Rules:
 - NEVER invent items or detail you cannot see. If something plausible might be present but is invisible (dressing, cooking oil, a filling, sauce mixed in), do NOT add it as an item and do NOT fold it into the numbers — raise it in "question" instead.
 - hidden_factor: for each item, the single most calorie-relevant variable you cannot see (e.g. "cooked in oil vs dry", "sugar in the sauce"), or null if the item is fully determined.
 - question: ONE short question about the highest-impact hidden variable across the whole plate (piece count, dressing amount, oil), or null if nothing material is hidden. Never more than one.
+- is_pastry: true only for sweet or enriched baked goods — pastries, croissants, cakes, muffins, cookies, biscuits, doughnuts, sweet buns, scones, pies and tarts, and similar bakery items. False for plain bread, crispbread, plain rolls, pizza bases, savoury pies, and everything that is not a baked good. This flag is a classification only: report the honest median calories as normal and never adjust the numbers because of it.
 - Macros must be consistent with standard nutrition data for the food and portion.
 - If the photo contains no food, return an empty items array and say so in notes.
 - notes: one short sentence about assumptions, or an empty string.`;
