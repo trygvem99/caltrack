@@ -45,9 +45,17 @@
       <div class="card" id="today-summary">
         <div class="stat">
           <div class="stat-head"><span>Calories</span><span id="kcal-nums">–</span></div>
-          <div class="bar"><div id="kcal-bar" class="fill"></div></div>
+          <div class="bar" id="plain-bar"><div id="kcal-bar" class="fill"></div></div>
+          <div class="zone-wrap" id="zone-wrap" hidden>
+            <div class="zb-track">
+              <div class="zb-fill" id="zb-fill"></div>
+              <div class="zb-tick" id="zb-cut"></div>
+              <div class="zb-tick" id="zb-maint"></div>
+              <div class="zb-tick" id="zb-bulk"></div>
+            </div>
+            <div class="zb-scale" id="zb-scale"></div>
+          </div>
           <div class="stat-sub" id="kcal-sub"></div>
-          <div class="cut-lines" id="cut-lines" hidden></div>
         </div>
         <div class="stat">
           <div class="stat-head"><span>Protein</span><span id="prot-nums">–</span></div>
@@ -61,6 +69,7 @@
         <input type="text" id="text-entry-input" placeholder="e.g. the teriyaki roll and a protein milk" />
         <button class="btn small primary" id="text-entry-btn">Log</button>
       </div>
+      <button class="linkish" id="repeat-meal-btn">↻ Repeat a meal from another day</button>
 
       <h2>Meals today</h2>
       <div id="meal-list"></div>
@@ -115,6 +124,18 @@
       </div>
       <datalist id="food-names"></datalist>
     </section>
+
+    <!-- repeat a previous meal -->
+    <div id="meal-picker" class="overlay" hidden>
+      <div class="picker-panel">
+        <div class="revise-row">
+          <input type="search" id="mp-search" placeholder="Search previous meals…" autocomplete="off" />
+          <button class="btn small" id="mp-cancel">Close</button>
+        </div>
+        <p class="hint" id="mp-count"></p>
+        <div id="mp-list"></div>
+      </div>
+    </div>
 
     <!-- shared searchable food picker -->
     <div id="food-picker" class="overlay" hidden>

@@ -246,15 +246,27 @@ button.link-food {
 }
 button.link-food.linked { border-color: var(--accent-dark); color: var(--accent); }
 
-/* cut mode */
-.cut-lines { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-.cut-pill {
-  font-size: 12px; padding: 4px 9px; border-radius: 9px;
-  border: 1px solid var(--line); color: var(--dim); white-space: nowrap;
-}
-.cut-pill b { color: var(--text); font-variant-numeric: tabular-nums; }
-.cut-pill.under { border-color: var(--accent-dark); }
-.cut-pill.over { border-color: var(--warn); color: var(--warn); }
+/* one bar carrying cut / maintenance / bulk */
+:root { --z-cut: #3b82f6; --z-maint: #4ade80; --z-bulk: #ca8a04; --z-over: #f87171; }
+.zone-wrap { margin-top: 2px; }
+.zb-track { position: relative; height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; }
+.zb-fill { height: 100%; width: 0; border-radius: 5px; transition: width 0.4s, background 0.3s; }
+.zb-fill.cut { background: var(--z-cut); }
+.zb-fill.maint { background: var(--z-maint); }
+.zb-fill.bulk { background: var(--z-bulk); }
+.zb-fill.over { background: var(--z-over); }
+.zb-tick { position: absolute; top: 0; width: 2px; height: 100%; background: var(--bg); opacity: 0.9; }
+.zb-scale { position: relative; height: 14px; margin-top: 3px; font-size: 10px; }
+.zb-scale .zs { position: absolute; white-space: nowrap; transform: translateX(-50%); font-variant-numeric: tabular-nums; }
+.zb-scale .zs.cut { left: 25%; color: var(--z-cut); }
+.zb-scale .zs.maint { left: 50%; color: var(--z-maint); }
+.zb-scale .zs.bulk { left: 75%; color: var(--z-bulk); }
+.zone-cut { color: var(--z-cut); }
+.zone-maint { color: var(--z-maint); }
+.zone-bulk { color: var(--z-bulk); }
+.zone-over { color: var(--z-over); }
+.mp-when { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
+#mp-list .fp-row { align-items: flex-start; }
 .badge-uplift { font-size: 11px; color: #eab308; margin-top: 4px; }
 .meal .copy { background: none; border: none; color: var(--dim); font-size: 15px; cursor: pointer; padding: 6px; }
 .meal .copy:hover { color: var(--accent); }

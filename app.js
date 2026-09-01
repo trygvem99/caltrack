@@ -115,7 +115,18 @@ function renderToday() {
   $("#kcal-bar").classList.toggle("over", t.kcal > kcalTarget);
   const left = kcalTarget - t.kcal;
   const rangeTxt = t.kcal ? `${Math.round(lo)}–${Math.round(hi)} of ${kcalTarget} · ` : "";
-  $("#kcal-sub").innerHTML = `<span class="range-sub">${rangeTxt}</span>${left >= 0 ? `${left} kcal remaining` : `${-left} kcal over`}`;
+  const maint = profile?.tdee;
+  if (cutMode() && maint) {
+    const z = zoneFor(t.kcal, maint);
+    const ref = z.key === "cut" ? maint - CUT_DEFICIT : z.key === "maint" ? maint : maint + CUT_DEFICIT;
+    const d = ref - t.kcal;
+    $("#kcal-sub").innerHTML =
+      `<span class="range-sub">${rangeTxt}</span><b class="zone-${z.key}">${z.label}</b> · ` +
+      (d >= 0 ? `${d} to ${z.key === "cut" ? "the cut line" : z.key === "maint" ? "maintenance" : "bulk"}`
+              : `${-d} over ${z.key === "cut" ? "the cut line" : z.key === "maint" ? "maintenance" : "bulk"}`);
+  } else {
+    $("#kcal-sub").innerHTML = `<span class="range-sub">${rangeTxt}</span>${left >= 0 ? `${left} kcal remaining` : `${-left} kcal over`}`;
+  }
 
   $("#prot-nums").textContent = protTarget ? `${Math.round(t.protein_g)} / ${protTarget} g` : `${Math.round(t.protein_g)} g`;
   $("#prot-bar").style.width = (protTarget ? Math.min(100, (t.protein_g / protTarget) * 100) : 0) + "%";
@@ -123,7 +134,7 @@ function renderToday() {
     ? t.protein_g >= protTarget ? "Protein goal hit ✓" : `${Math.round(protTarget - t.protein_g)} g to go`
     : "";
 
-  renderCutLines(t.kcal);
+  renderZoneBar(t.kcal);
   $("#tier-line").textContent = tierLine(logDate);
 
   const list = $("#meal-list");
@@ -168,25 +179,39 @@ $("#log-date").addEventListener("change", (e) => {
   else renderDateNav();
 });
 
-// Cut mode shows both reference lines for the day: maintenance (your measured
-// TDEE) and the cut line 500 kcal under it.
-function renderCutLines(eaten) {
-  const box = $("#cut-lines");
-  if (!cutMode()) { box.hidden = true; return; }
-  box.hidden = false;
+// One bar carrying all three thresholds. Scale runs maintenance-1000 to
+// maintenance+1000, which puts cut/maintenance/bulk at a readable 25/50/75%.
+// The fill colour says which zone the day currently sits in.
+function zoneFor(eaten, maint) {
+  if (eaten <= maint - CUT_DEFICIT) return { key: "cut", label: "Cutting" };
+  if (eaten <= maint) return { key: "maint", label: "Maintenance" };
+  if (eaten <= maint + CUT_DEFICIT * 2) return { key: "bulk", label: "Bulking" };
+  return { key: "over", label: "Over bulk" };
+}
+
+function renderZoneBar(eaten) {
   const maint = profile?.tdee;
-  if (!maint) {
-    box.innerHTML = `<span class="hint">Set your maintenance (TDEE) in Settings to see the cut line — or let the weight trend work it out on History.</span>`;
-    return;
-  }
+  const on = cutMode() && !!maint;
+  $("#zone-wrap").hidden = !on;
+  $("#plain-bar").hidden = on;
+  if (!on) return;
+
   const cut = maint - CUT_DEFICIT;
-  const pill = (label, target) => {
-    const diff = target - eaten;
-    const under = diff >= 0;
-    return `<span class="cut-pill ${under ? "under" : "over"}">
-      ${label} <b>${target}</b> · ${under ? `${diff} left` : `${-diff} over`}</span>`;
-  };
-  box.innerHTML = pill("Maintenance", maint) + pill("Cut", cut);
+  const bulk = maint + CUT_DEFICIT;
+  const lo = maint - 1000, hi = maint + 1000;
+  const pct = (v) => Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100));
+
+  const zone = zoneFor(eaten, maint);
+  const fill = $("#zb-fill");
+  fill.style.width = pct(eaten) + "%";
+  fill.className = "zb-fill " + zone.key;
+  $("#zb-cut").style.left = pct(cut) + "%";
+  $("#zb-maint").style.left = pct(maint) + "%";
+  $("#zb-bulk").style.left = pct(bulk) + "%";
+  $("#zb-scale").innerHTML =
+    `<span class="zs cut">Cut ${cut}</span>` +
+    `<span class="zs maint">Maint ${maint}</span>` +
+    `<span class="zs bulk">Bulk ${bulk}</span>`;
 }
 
 function tierLine(date) {
@@ -351,7 +376,69 @@ $("#food-picker").addEventListener("click", (e) => {
   if (e.target.id === "food-picker") closeFoodPicker();
 });
 
+// ---------- repeat a previous meal ----------
+// Finding yesterday's lunch by navigating the date picker is not obvious, so
+// this lists recent meals directly and copies one onto the day in view.
+function openMealPicker() {
+  $("#mp-search").value = "";
+  $("#meal-picker").hidden = false;
+  renderMealPicker();
+  $("#mp-search").focus();
+}
+function closeMealPicker() { $("#meal-picker").hidden = true; }
+
+function renderMealPicker() {
+  const q = ($("#mp-search").value || "").trim().toLowerCase();
+  const cutoff = dateNDaysAgo(30);
+  const hits = log
+    .filter((e) => e.date >= cutoff && e.date !== logDate)
+    .filter((e) => !e.items.every((i) => i.provenance === "legacy"))
+    .filter((e) => !q || e.items.some((i) => i.name.toLowerCase().includes(q)))
+    .sort((a, b) => (a.date === b.date ? (a.time < b.time ? 1 : -1) : a.date < b.date ? 1 : -1))
+    .slice(0, 60);
+
+  $("#mp-count").textContent = hits.length
+    ? `${hits.length} meal${hits.length === 1 ? "" : "s"} from the last 30 days · tap to add to ${prettyDate(logDate)}`
+    : q ? "No meal matches that." : "No earlier meals to repeat yet.";
+
+  const wrap = $("#mp-list");
+  wrap.innerHTML = "";
+  for (const e of hits) {
+    const row = document.createElement("button");
+    row.className = "fp-row";
+    const when = e.date === todayStr() ? "Today" : prettyDate(e.date).replace(/,.*$/, "");
+    row.innerHTML = `<span class="fp-name">${esc(e.items.map((i) => i.name).join(", "))}
+        <span class="mp-when">${when} · ${e.time}</span></span>
+      <span class="f-kcal">${e.totals.kcal} kcal</span>`;
+    row.addEventListener("click", async () => {
+      closeMealPicker();
+      await copyEntryToDate(e, logDate);
+    });
+    wrap.appendChild(row);
+  }
+}
+$("#repeat-meal-btn").addEventListener("click", openMealPicker);
+$("#mp-search").addEventListener("input", renderMealPicker);
+$("#mp-cancel").addEventListener("click", closeMealPicker);
+$("#meal-picker").addEventListener("click", (e) => {
+  if (e.target.id === "meal-picker") closeMealPicker();
+});
+
 // ---------- copy a meal onto another day ----------
+async function copyEntryToDate(e, target) {
+  const when = new Date();
+  const copy = {
+    ...JSON.parse(JSON.stringify(e)),
+    id: Data.newId(),
+    date: target,
+    time: `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`,
+  };
+  await Data.log.put(copy);
+  log.push(copy);
+  logDate = target;
+  showView("today");
+}
+
 async function copyEntryToToday(e) {
   const target = todayStr();
   const when = new Date();
@@ -1096,9 +1183,20 @@ function renderHistory() {
     const meals = div.querySelector(".day-meals");
     div.addEventListener("click", () => {
       if (meals.hidden) {
-        meals.innerHTML = dayEntries(d)
-          .map((e) => `<div class="meal"><div class="m-info"><div class="m-name">${e.time} — ${e.items.map((i) => esc(i.name)).join(", ")}</div></div><div class="m-kcal">${e.totals.kcal} kcal</div></div>`)
-          .join("");
+        meals.innerHTML = "";
+        for (const en of dayEntries(d)) {
+          const m = document.createElement("div");
+          m.className = "meal";
+          m.innerHTML = `<div class="m-info"><div class="m-name">${en.time} — ${en.items.map((i) => esc(i.name)).join(", ")}</div></div>
+            <div class="m-kcal">${en.totals.kcal} kcal</div>
+            <button class="copy" title="Copy to today">⧉</button>`;
+          m.querySelector(".copy").addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            if (!confirm(`Copy this ${en.totals.kcal} kcal meal to today?`)) return;
+            await copyEntryToDate(en, todayStr());
+          });
+          meals.appendChild(m);
+        }
       }
       meals.hidden = !meals.hidden;
     });
