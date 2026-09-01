@@ -4,7 +4,13 @@ const CACHE = "caltrack-v3";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./math.js", "./db.js", "./llm.js", "./manifest.webmanifest", "./icon.svg", "./seed/foods.json"];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
+  // addAll() also reads through the HTTP cache, so without cache:"reload" the
+  // offline fallback can be primed with the very files a deploy just replaced.
+  e.waitUntil(
+    caches.open(CACHE).then((c) =>
+      c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))
+    )
+  );
   self.skipWaiting();
 });
 self.addEventListener("activate", (e) => {
