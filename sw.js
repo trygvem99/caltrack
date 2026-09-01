@@ -1,6 +1,6 @@
 // Network-first with cache fallback: offline works, and new deploys are picked
 // up automatically without a cache-name bump per deploy.
-const CACHE = "caltrack-v2";
+const CACHE = "caltrack-v3";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./math.js", "./db.js", "./llm.js", "./manifest.webmanifest", "./icon.svg", "./seed/foods.json"];
 
 self.addEventListener("install", (e) => {
@@ -14,8 +14,13 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== self.location.origin) return; // never touch API calls
+  // `cache: "no-cache"` makes this genuinely network-first. A plain fetch() goes
+  // through the browser HTTP cache, and GitHub Pages sends max-age=600 — so a
+  // deploy stayed invisible for ten minutes and the stale copy got re-cached
+  // here on top. "no-cache" still revalidates (304 when unchanged), so it costs
+  // almost nothing but always sees a new deploy immediately.
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: "no-cache" })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
