@@ -1,4 +1,9 @@
 * { box-sizing: border-box; margin: 0; }
+/* The `hidden` attribute is only a UA-stylesheet rule, so ANY author `display`
+   declaration silently defeats it. The app toggles `hidden` everywhere, so this
+   has to win — without it a hidden overlay still covers the screen and eats
+   every tap. */
+[hidden] { display: none !important; }
 :root {
   --bg: #101418;
   --card: #1a2129;
