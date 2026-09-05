@@ -48,6 +48,21 @@
     return Math.sqrt(mean(res.map((r) => r * r)));
   }
 
+  // Zone bar geometry. Deliberately anchored at zero: a scale that started near
+  // the thresholds left the bar at 0% for the first ~2000 kcal of the day, so a
+  // logged breakfast moved nothing.
+  function zoneBarTop(maint, deficit) { return maint + deficit * 2; }
+  function zoneBarPct(kcal, maint, deficit) {
+    const top = zoneBarTop(maint, deficit);
+    return clamp((kcal / top) * 100, 0, 100);
+  }
+  function zoneKey(kcal, maint, deficit) {
+    if (kcal <= maint - deficit) return "cut";
+    if (kcal <= maint) return "maint";
+    if (kcal <= maint + deficit * 2) return "bulk";
+    return "over";
+  }
+
   // per-100g macros derived from weighed ingredients + final batch weight
   function recipePer100g(ingredients, totalG) {
     const sum = (f) => ingredients.reduce((s, i) => s + (i[f] || 0), 0);
@@ -85,7 +100,7 @@
     return { status: "ready", implied, suggested: tdee + delta, delta, confidence };
   }
 
-  const api = { clamp, mean, round1, daysBetween, rollingMean7, linearFitSlope, residualStdev, recipePer100g, tdeeSuggestion };
+  const api = { clamp, mean, round1, daysBetween, rollingMean7, linearFitSlope, residualStdev, recipePer100g, tdeeSuggestion, zoneBarTop, zoneBarPct, zoneKey };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.CalMath = api;
 })(typeof window !== "undefined" ? window : globalThis);

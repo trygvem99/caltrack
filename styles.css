@@ -256,11 +256,12 @@ button.link-food.linked { border-color: var(--accent-dark); color: var(--accent)
 .zb-fill.bulk { background: var(--z-bulk); }
 .zb-fill.over { background: var(--z-over); }
 .zb-tick { position: absolute; top: 0; width: 2px; height: 100%; background: var(--bg); opacity: 0.9; }
-.zb-scale { position: relative; height: 14px; margin-top: 3px; font-size: 10px; }
-.zb-scale .zs { position: absolute; white-space: nowrap; transform: translateX(-50%); font-variant-numeric: tabular-nums; }
-.zb-scale .zs.cut { left: 25%; color: var(--z-cut); }
-.zb-scale .zs.maint { left: 50%; color: var(--z-maint); }
-.zb-scale .zs.bulk { left: 75%; color: var(--z-bulk); }
+.zb-scale { display: flex; gap: 12px; margin-top: 4px; font-size: 10px; flex-wrap: wrap; }
+.zb-scale .zs { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.zb-scale .zs::before { content: "● "; }
+.zb-scale .zs.cut { color: var(--z-cut); }
+.zb-scale .zs.maint { color: var(--z-maint); }
+.zb-scale .zs.bulk { color: var(--z-bulk); }
 .zone-cut { color: var(--z-cut); }
 .zone-maint { color: var(--z-maint); }
 .zone-bulk { color: var(--z-bulk); }

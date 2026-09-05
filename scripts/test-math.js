@@ -111,3 +111,32 @@ assert.ok(!dev(500, 508), "1.6% not a correction");
 assert.ok(dev(500, 515), "3% is a correction");
 
 console.log("All math tests passed.");
+
+// --- zone bar geometry (regression: the bar must move on the first meal) ---
+const D = 500, MAINT = 3100;
+assert.strictEqual(M.zoneBarTop(MAINT, D), 4100, "bar tops out where red begins");
+assert.strictEqual(M.zoneBarPct(0, MAINT, D), 0);
+assert.ok(M.zoneBarPct(120, MAINT, D) > 2, "a 120 kcal snack must visibly move the bar");
+assert.ok(M.zoneBarPct(620, MAINT, D) > 14, "a normal breakfast must be clearly visible");
+// the scale must be anchored at zero — this is the bug that shipped
+for (const k of [50, 120, 350, 620, 1100, 1800]) {
+  assert.ok(M.zoneBarPct(k, MAINT, D) > 0, `intake ${k} must not render as an empty bar`);
+}
+// monotonic and clamped
+let prev = -1;
+for (const k of [0, 500, 1500, 2600, 3100, 3600, 4100, 9000]) {
+  const p = M.zoneBarPct(k, MAINT, D);
+  assert.ok(p >= prev, "bar never goes backwards"); prev = p;
+  assert.ok(p <= 100, "bar never exceeds 100%");
+}
+assert.strictEqual(M.zoneBarPct(9000, MAINT, D), 100, "clamps at the top");
+
+// zone boundaries
+assert.strictEqual(M.zoneKey(2600, MAINT, D), "cut");
+assert.strictEqual(M.zoneKey(2601, MAINT, D), "maint");
+assert.strictEqual(M.zoneKey(3100, MAINT, D), "maint");
+assert.strictEqual(M.zoneKey(3101, MAINT, D), "bulk");
+assert.strictEqual(M.zoneKey(4100, MAINT, D), "bulk");
+assert.strictEqual(M.zoneKey(4101, MAINT, D), "over");
+
+console.log("Zone bar tests passed.");

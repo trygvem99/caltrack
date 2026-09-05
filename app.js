@@ -3,7 +3,7 @@
 "use strict";
 
 const $ = (sel) => document.querySelector(sel);
-const { rollingMean7, linearFitSlope, tdeeSuggestion, recipePer100g, daysBetween, round1: r1 } = CalMath;
+const { rollingMean7, linearFitSlope, tdeeSuggestion, recipePer100g, daysBetween, round1: r1, zoneBarPct, zoneKey } = CalMath;
 
 let profile = null;
 let log = [];        // all log entries
@@ -194,11 +194,10 @@ $("#log-date").addEventListener("change", (e) => {
 // One bar carrying all three thresholds. Scale runs maintenance-1000 to
 // maintenance+1000, which puts cut/maintenance/bulk at a readable 25/50/75%.
 // The fill colour says which zone the day currently sits in.
+const ZONE_LABEL = { cut: "Cutting", maint: "Maintenance", bulk: "Bulking", over: "Over bulk" };
 function zoneFor(eaten, maint) {
-  if (eaten <= maint - CUT_DEFICIT) return { key: "cut", label: "Cutting" };
-  if (eaten <= maint) return { key: "maint", label: "Maintenance" };
-  if (eaten <= maint + CUT_DEFICIT * 2) return { key: "bulk", label: "Bulking" };
-  return { key: "over", label: "Over bulk" };
+  const key = zoneKey(eaten, maint, CUT_DEFICIT);
+  return { key, label: ZONE_LABEL[key] };
 }
 
 function renderZoneBar(eaten) {
@@ -210,8 +209,10 @@ function renderZoneBar(eaten) {
 
   const cut = maint - CUT_DEFICIT;
   const bulk = maint + CUT_DEFICIT;
-  const lo = maint - 1000, hi = maint + 1000;
-  const pct = (v) => Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100));
+  // The scale MUST start at zero. Starting it near the thresholds put them at
+  // tidy positions but left the bar pinned at 0% for the first ~2000 kcal of
+  // every day, so a logged breakfast moved nothing at all.
+  const pct = (v) => zoneBarPct(v, maint, CUT_DEFICIT);
 
   const zone = zoneFor(eaten, maint);
   const fill = $("#zb-fill");
@@ -220,6 +221,8 @@ function renderZoneBar(eaten) {
   $("#zb-cut").style.left = pct(cut) + "%";
   $("#zb-maint").style.left = pct(maint) + "%";
   $("#zb-bulk").style.left = pct(bulk) + "%";
+  // A flow legend, not labels positioned under each tick: at this scale the
+  // three thresholds sit close together and absolute labels would overlap.
   $("#zb-scale").innerHTML =
     `<span class="zs cut">Cut ${cut}</span>` +
     `<span class="zs maint">Maint ${maint}</span>` +
