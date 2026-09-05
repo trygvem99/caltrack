@@ -266,6 +266,8 @@ button.link-food.linked { border-color: var(--accent-dark); color: var(--accent)
 .zone-bulk { color: var(--z-bulk); }
 .zone-over { color: var(--z-over); }
 .mp-when { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
+.maint-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.maint-foot .hint { margin: 4px 0; }
 #mp-list .fp-row { align-items: flex-start; }
 .badge-uplift { font-size: 11px; color: #eab308; margin-top: 4px; }
 .meal .copy { background: none; border: none; color: var(--dim); font-size: 15px; cursor: pointer; padding: 6px; }

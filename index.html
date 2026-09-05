@@ -173,7 +173,12 @@
         <h2>Daily targets (kcal per weekday)</h2>
         <div class="weekday-grid" id="weekday-targets"></div>
         <label>Protein target (g)<input type="number" id="f-prot-target" min="40" max="400" /></label>
-        <label>Current TDEE / maintenance (kcal)<input type="number" id="f-tdee" min="1000" max="6000" /></label>
+        <h2>Maintenance (kcal you burn, per weekday)</h2>
+        <div class="weekday-grid" id="maintenance-grid"></div>
+        <div class="maint-foot">
+          <span class="hint" id="maint-avg"></span>
+          <button class="linkish tiny" id="maint-same">same every day</button>
+        </div>
         <label class="checkline">
           <input type="checkbox" id="f-cut-mode" />
           <span><b>Cut mode</b> — show maintenance and a cut line 500 kcal below it, and add

@@ -24,6 +24,7 @@ const CUT_DEFICIT = 500;   // kcal below maintenance
 const PASTRY_UPLIFT = 0.075; // pastry is reliably under-read from a photo
 const cutMode = () => !!profile?.cut_mode;
 const DEFAULT_TARGETS = [3050, 2500, 2500, 2500, 3050, 3050, 3050]; // getDay(): Sun..Sat
+const WEEKDAYS = [["Mon", 1], ["Tue", 2], ["Wed", 3], ["Thu", 4], ["Fri", 5], ["Sat", 6], ["Sun", 0]];
 
 // ---------- helpers ----------
 const todayStr = () => {
@@ -68,9 +69,20 @@ const dayRange = (date) => {
     return [lo + l, hi + h];
   }, [0, 0]);
 };
-const kcalTargetFor = (date) => {
-  const day = new Date(date + "T12:00:00").getDay();
-  return (profile?.kcal_targets || DEFAULT_TARGETS)[day];
+const weekdayOf = (date) => new Date(date + "T12:00:00").getDay();
+const kcalTargetFor = (date) => (profile?.kcal_targets || DEFAULT_TARGETS)[weekdayOf(date)];
+
+// Maintenance is per weekday: training and rest days do not burn the same, and
+// a single TDEE figure cannot express that. profile.tdee remains the WEEKLY
+// AVERAGE, which is what the weight trend actually measures over 14 days.
+const maintenanceFor = (date) => {
+  const arr = profile?.maintenance;
+  const v = Array.isArray(arr) ? arr[weekdayOf(date)] : null;
+  return v || profile?.tdee || null;
+};
+const maintenanceAvg = (arr) => {
+  const a = (arr || []).filter((x) => x > 0);
+  return a.length === 7 ? Math.round(a.reduce((s, x) => s + x, 0) / 7) : null;
 };
 const activeSeries = () => {
   const s = series.filter((x) => !x.legacy).sort((a, b) => (a.start < b.start ? 1 : -1));
@@ -115,7 +127,7 @@ function renderToday() {
   $("#kcal-bar").classList.toggle("over", t.kcal > kcalTarget);
   const left = kcalTarget - t.kcal;
   const rangeTxt = t.kcal ? `${Math.round(lo)}–${Math.round(hi)} of ${kcalTarget} · ` : "";
-  const maint = profile?.tdee;
+  const maint = maintenanceFor(logDate);
   if (cutMode() && maint) {
     const z = zoneFor(t.kcal, maint);
     const ref = z.key === "cut" ? maint - CUT_DEFICIT : z.key === "maint" ? maint : maint + CUT_DEFICIT;
@@ -190,7 +202,7 @@ function zoneFor(eaten, maint) {
 }
 
 function renderZoneBar(eaten) {
-  const maint = profile?.tdee;
+  const maint = maintenanceFor(logDate);
   const on = cutMode() && !!maint;
   $("#zone-wrap").hidden = !on;
   $("#plain-bar").hidden = on;
@@ -1224,7 +1236,7 @@ function tdeeInput() {
 function renderTdeeCard() {
   const card = $("#hist-tdee-card");
   const sug = tdeeSuggestion(tdeeInput());
-  const current = profile?.tdee ? `<p><b>TDEE ${profile.tdee} kcal</b>${profile.tdee_updated ? ` <span class="hint">(set ${profile.tdee_updated})</span>` : ""}</p>` : `<p class="hint">No TDEE set yet — set one in Settings or wait for the weight trend.</p>`;
+  const current = profile?.tdee ? `<p><b>${profile.tdee} kcal</b> average maintenance${profile.tdee_updated ? ` <span class="hint">(set ${profile.tdee_updated})</span>` : ""}</p>` : `<p class="hint">No TDEE set yet — set one in Settings or wait for the weight trend.</p>`;
   let body = "";
   if (sug.status === "settling") body = `<p class="hint">Weight series settling — revisions start 12 days after the series began.</p>`;
   else if (sug.status === "insufficient-weights") body = `<p class="hint">Need ≥10 weigh-ins in the last 14 days for a revision.</p>`;
@@ -1239,6 +1251,14 @@ function renderTdeeCard() {
   const btn = $("#apply-tdee-btn");
   if (btn) btn.addEventListener("click", async () => {
     const before = profile.tdee;
+    // the trend measures a 14-day average, so move every day by the same delta
+    // rather than flattening the week onto one number
+    const shift = before ? sug.suggested - before : 0;
+    if (Array.isArray(profile.maintenance) && before) {
+      profile.maintenance = profile.maintenance.map((m) => (m ? m + shift : sug.suggested));
+    } else {
+      profile.maintenance = Array(7).fill(sug.suggested);
+    }
     profile.tdee = sug.suggested;
     profile.tdee_updated = todayStr();
     profile.tdee_history = profile.tdee_history || [];
@@ -1252,7 +1272,6 @@ function renderTdeeCard() {
 }
 
 // ---------- settings ----------
-const WEEKDAYS = [["Mon", 1], ["Tue", 2], ["Wed", 3], ["Thu", 4], ["Fri", 5], ["Sat", 6], ["Sun", 0]];
 
 function renderSettings() {
   if (!$("#recipe-builder").hidden) closeRecipeBuilder();
@@ -1269,7 +1288,7 @@ function renderSettings() {
     `<label>${label}<input type="number" data-day="${idx}" min="800" max="6000" value="${(profile?.kcal_targets || DEFAULT_TARGETS)[idx]}" /></label>`
   ).join("");
   $("#f-prot-target").value = profile?.protein_target ?? 160;
-  $("#f-tdee").value = profile?.tdee ?? "";
+  renderMaintenanceGrid();
   $("#f-cut-mode").checked = !!profile?.cut_mode;
   renderCutModeNote();
   if (profile?.mifflin) {
@@ -1301,8 +1320,12 @@ $("#mifflin-btn").addEventListener("click", () => {
   if (!w || !h || !a) { $("#mifflin-out").textContent = "Fill weight, height, age."; return; }
   const bmr = 10 * w + 6.25 * h - 5 * a + (sex === "male" ? 5 : -161);
   const tdee = Math.round(bmr * act);
-  $("#mifflin-out").textContent = ` ≈ ${tdee} kcal`;
-  if (!$("#f-tdee").value) $("#f-tdee").value = tdee;
+  $("#mifflin-out").textContent = ` ≈ ${tdee} kcal/day`;
+  const grid = document.querySelectorAll("#maintenance-grid input");
+  if (![...grid].some((i) => i.value)) {
+    grid.forEach((i) => (i.value = tdee));
+    updateMaintAvg();
+  }
 });
 
 $("#save-profile-btn").addEventListener("click", async () => {
@@ -1310,11 +1333,13 @@ $("#save-profile-btn").addEventListener("click", async () => {
   document.querySelectorAll("#weekday-targets input").forEach((inp) => {
     targets[Number(inp.dataset.day)] = Number(inp.value) || targets[Number(inp.dataset.day)];
   });
-  const tdeeVal = Number($("#f-tdee").value) || null;
+  const maintenance = readMaintenanceGrid();
+  const tdeeVal = maintenanceAvg(maintenance) || null;
   const hadTdee = profile?.tdee;
   profile = {
     ...(profile || {}),
     kcal_targets: targets,
+    maintenance,
     protein_target: Number($("#f-prot-target").value) || 160,
     tdee: tdeeVal,
     cut_mode: $("#f-cut-mode").checked,
@@ -1612,6 +1637,42 @@ $("#rb-save").addEventListener("click", async () => {
   }
 });
 
+// ---------- per-weekday maintenance ----------
+function renderMaintenanceGrid() {
+  const arr = profile?.maintenance || [];
+  $("#maintenance-grid").innerHTML = WEEKDAYS.map(([label, idx]) =>
+    `<label>${label}<input type="number" data-mday="${idx}" min="800" max="8000" inputmode="numeric" value="${arr[idx] || ""}" /></label>`
+  ).join("");
+  document.querySelectorAll("#maintenance-grid input").forEach((inp) =>
+    inp.addEventListener("input", updateMaintAvg)
+  );
+  updateMaintAvg();
+}
+function readMaintenanceGrid() {
+  const arr = (profile?.maintenance || Array(7).fill(null)).slice();
+  document.querySelectorAll("#maintenance-grid input").forEach((inp) => {
+    arr[Number(inp.dataset.mday)] = Number(inp.value) || null;
+  });
+  return arr;
+}
+function updateMaintAvg() {
+  const arr = readMaintenanceGrid();
+  const avg = maintenanceAvg(arr);
+  const filled = arr.filter((x) => x > 0).length;
+  $("#maint-avg").textContent = avg
+    ? `Weekly average ${avg} kcal — this is the figure the weight trend checks.`
+    : filled
+      ? `${filled} of 7 days filled — complete the week to get an average.`
+      : "Not set. Cut and bulk lines need this.";
+  renderCutModeNote();
+}
+$("#maint-same").addEventListener("click", () => {
+  const first = [...document.querySelectorAll("#maintenance-grid input")].find((i) => i.value);
+  if (!first) return alert("Fill in one day first, then this copies it across.");
+  document.querySelectorAll("#maintenance-grid input").forEach((i) => (i.value = first.value));
+  updateMaintAvg();
+});
+
 let expandedFoodId = null;
 let foodsFilterBasis = "";
 
@@ -1839,8 +1900,13 @@ async function reloadCaches() {
     if (!profile) {
       profile = {
         kcal_targets: DEFAULT_TARGETS.slice(), protein_target: 160,
+        maintenance: Array(7).fill(null),
         tdee: null, tdee_updated: null, tdee_history: [],
       };
+      await Data.saveProfile(profile);
+    } else if (!Array.isArray(profile.maintenance)) {
+      // carry a previously-set single TDEE across as a flat week
+      profile.maintenance = Array(7).fill(profile.tdee || null);
       await Data.saveProfile(profile);
     }
   } catch (e) {
@@ -1857,7 +1923,7 @@ async function reloadCaches() {
 // but cannot draw the lines yet.
 function renderCutModeNote() {
   const on = $("#f-cut-mode").checked;
-  const maint = Number($("#f-tdee").value) || profile?.tdee || 0;
+  const maint = maintenanceAvg(readMaintenanceGrid()) || profile?.tdee || 0;
   $("#cut-mode-note").textContent = !on
     ? ""
     : maint
@@ -1865,4 +1931,4 @@ function renderCutModeNote() {
       : "Cut mode is on, but there is no maintenance figure yet — set TDEE above, or let the weight trend derive it on History.";
 }
 $("#f-cut-mode").addEventListener("change", renderCutModeNote);
-$("#f-tdee").addEventListener("input", renderCutModeNote);
+
