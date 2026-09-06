@@ -205,6 +205,9 @@ function renderZoneBar(eaten) {
   const on = cutMode() && !!maint;
   $("#zone-wrap").hidden = !on;
   $("#plain-bar").hidden = on;
+  // Cut mode with no maintenance set silently drew nothing, so the feature
+  // looked broken rather than unconfigured.
+  $("#maint-prompt").hidden = !(cutMode() && !maint);
   if (!on) return;
 
   const cut = maint - CUT_DEFICIT;
@@ -223,9 +226,10 @@ function renderZoneBar(eaten) {
   $("#zb-bulk").style.left = pct(bulk) + "%";
   // A flow legend, not labels positioned under each tick: at this scale the
   // three thresholds sit close together and absolute labels would overlap.
+  const dayName = new Date(logDate + "T12:00:00").toLocaleDateString(undefined, { weekday: "short" });
   $("#zb-scale").innerHTML =
     `<span class="zs cut">Cut ${cut}</span>` +
-    `<span class="zs maint">Maint ${maint}</span>` +
+    `<span class="zs maint">Maint ${maint} (${dayName})</span>` +
     `<span class="zs bulk">Bulk ${bulk}</span>`;
 }
 
@@ -1366,10 +1370,12 @@ $("#save-profile-btn").addEventListener("click", async () => {
 // exactly the way it was built (add, remove, re-weigh, change the batch).
 let rbIngredients = [];
 let rbEditingId = null;
+let rbPicked = null;   // food chosen through the searchable picker
 
 function openRecipeBuilder(existing) {
   rbEditingId = existing ? existing.id : null;
   rbIngredients = existing ? JSON.parse(JSON.stringify(existing.ingredients || [])) : [];
+  rbPicked = null;
   $("#rb-heading").textContent = existing ? "Edit recipe" : "New recipe";
   $("#rb-save").textContent = existing ? "Save changes" : "Save recipe";
   $("#rb-name").value = existing ? existing.name : "";
@@ -1379,7 +1385,6 @@ function openRecipeBuilder(existing) {
   $("#rb-total").value = existing ? existing.total_g : "";
   if (existing) $("#rb-total").dataset.touched = "1";
   else delete $("#rb-total").dataset.touched;
-  $("#rb-search").value = "";
   $("#rb-custom-name").value = "";
   $("#rb-custom-grams").value = "";
   ["#rb-m-kcal", "#rb-m-p", "#rb-m-c", "#rb-m-f"].forEach((sel) => ($(sel).value = ""));
@@ -1397,17 +1402,10 @@ function closeRecipeBuilder() {
 }
 
 function renderRecipeBuilder() {
-  const sel = $("#rb-food");
-  const keep = sel.value;
-  const q = ($("#rb-search").value || "").trim().toLowerCase();
-  const pool = foods
-    .filter((f) => foodMatchesQuery(f, q))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  sel.innerHTML = pool.length
-    ? pool.map((f) => `<option value="${f.id}">${esc(f.name)} — ${f.per_100g.kcal}/100g</option>`).join("")
-    : `<option value="">${foods.length ? "no match" : "no saved foods yet"}</option>`;
-  // keep the current pick only while it survives the filter
-  if (keep && pool.some((f) => f.id === keep)) sel.value = keep;
+  $("#rb-pick").textContent = rbPicked
+    ? `🔍 ${rbPicked.name} — ${rbPicked.per_100g.kcal}/100g`
+    : "🔍 Search saved foods…";
+  $("#rb-pick").classList.toggle("linked", !!rbPicked);
 
   const wrap = $("#rb-ingredients");
   wrap.innerHTML = rbIngredients.length
@@ -1484,6 +1482,10 @@ function syncBatchDefault() {
   if (!el.dataset.touched) el.value = raw || "";
 }
 
+$("#rb-pick").addEventListener("click", () => {
+  if (!foods.length) return alert("No saved foods yet — scan a label, or save an item from a meal.");
+  openFoodPicker((food) => { rbPicked = food; renderRecipeBuilder(); $("#rb-grams").focus(); });
+});
 $("#new-recipe-btn").addEventListener("click", openRecipeBuilder);
 $("#rb-cancel").addEventListener("click", closeRecipeBuilder);
 // Reachable straight from Today — building a recipe is a cooking-time action,
@@ -1494,7 +1496,6 @@ $("#recipe-shortcut-btn").addEventListener("click", () => {
   $("#recipe-builder").scrollIntoView({ behavior: "smooth", block: "center" });
   $("#rb-name").focus();
 });
-$("#rb-search").addEventListener("input", renderRecipeBuilder);
 $("#rb-manual-toggle").addEventListener("click", () => {
   const box = $("#rb-manual");
   box.hidden = !box.hidden;
@@ -1570,13 +1571,9 @@ $("#rb-total").addEventListener("input", (e) => {
   renderRecipeBuilder();
 });
 $("#rb-add").addEventListener("click", () => {
-  const food = foods.find((f) => f.id === $("#rb-food").value);
+  const food = rbPicked;
   const grams = Number($("#rb-grams").value);
-  if (!food) {
-    return alert(foods.length
-      ? "Nothing is selected — clear the filter above, or pick an ingredient from the list."
-      : "Save some foods first — scan a label, or save an item from a meal.");
-  }
+  if (!food) return alert("Tap \"Search saved foods\" and choose an ingredient first.");
   if (!grams || grams <= 0) return alert("How many grams of that ingredient?");
   const k = grams / 100;
   rbIngredients.push({
@@ -1585,6 +1582,7 @@ $("#rb-add").addEventListener("click", () => {
     carbs_g: r1(food.per_100g.carbs_g * k), fat_g: r1(food.per_100g.fat_g * k),
   });
   $("#rb-grams").value = "";
+  rbPicked = null;
   syncBatchDefault();
   renderRecipeBuilder();
 });
@@ -1669,6 +1667,13 @@ function updateMaintAvg() {
       : "Not set. Cut and bulk lines need this.";
   renderCutModeNote();
 }
+$("#maint-from-targets").addEventListener("click", () => {
+  const t = profile?.kcal_targets || DEFAULT_TARGETS;
+  document.querySelectorAll("#maintenance-grid input").forEach((i) => {
+    i.value = t[Number(i.dataset.mday)];
+  });
+  updateMaintAvg();
+});
 $("#maint-same").addEventListener("click", () => {
   const first = [...document.querySelectorAll("#maintenance-grid input")].find((i) => i.value);
   if (!first) return alert("Fill in one day first, then this copies it across.");
@@ -1926,7 +1931,7 @@ async function reloadCaches() {
 // but cannot draw the lines yet.
 function renderCutModeNote() {
   const on = $("#f-cut-mode").checked;
-  const maint = maintenanceAvg(readMaintenanceGrid()) || profile?.tdee || 0;
+  const maint = maintenanceAvg(readMaintenanceGrid()) || 0;
   $("#cut-mode-note").textContent = !on
     ? ""
     : maint
@@ -1935,3 +1940,8 @@ function renderCutModeNote() {
 }
 $("#f-cut-mode").addEventListener("change", renderCutModeNote);
 
+
+$("#go-set-maint").addEventListener("click", () => {
+  showView("settings");
+  $("#maintenance-grid").scrollIntoView({ behavior: "smooth", block: "center" });
+});

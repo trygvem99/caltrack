@@ -56,6 +56,10 @@
             <div class="zb-scale" id="zb-scale"></div>
           </div>
           <div class="stat-sub" id="kcal-sub"></div>
+          <div class="hint maint-prompt" id="maint-prompt" hidden>
+            Cut mode is on but your maintenance is not set, so no cut or bulk line can be drawn.
+            <button class="linkish tiny" id="go-set-maint">Set it per weekday →</button>
+          </div>
         </div>
         <div class="stat">
           <div class="stat-head"><span>Protein</span><span id="prot-nums">–</span></div>
@@ -175,9 +179,13 @@
         <label>Protein target (g)<input type="number" id="f-prot-target" min="40" max="400" /></label>
         <h2>Maintenance (kcal you burn, per weekday)</h2>
         <div class="weekday-grid" id="maintenance-grid"></div>
+        <p class="hint">What you <b>burn</b> on each weekday — a training day and a rest day are not the same. Cut and bulk lines are drawn from the day's own figure.</p>
         <div class="maint-foot">
           <span class="hint" id="maint-avg"></span>
-          <button class="linkish tiny" id="maint-same">same every day</button>
+          <span>
+            <button class="linkish tiny" id="maint-from-targets">use my targets</button>
+            <button class="linkish tiny" id="maint-same">same every day</button>
+          </span>
         </div>
         <label class="checkline">
           <input type="checkbox" id="f-cut-mode" />
@@ -226,9 +234,8 @@
           <label>Recipe name<input type="text" id="rb-name" placeholder="e.g. Pancake batter" /></label>
           <div id="rb-ingredients"></div>
           <p class="hint tiny-label">From your saved foods — exact</p>
-          <input type="search" id="rb-search" placeholder="Filter ingredients…" autocomplete="off" />
           <div class="revise-row">
-            <select id="rb-food"></select>
+            <button class="link-food" id="rb-pick">🔍 Search saved foods…</button>
             <input type="number" id="rb-grams" min="0" placeholder="g" inputmode="decimal" />
             <button class="btn small" id="rb-add">Add</button>
           </div>

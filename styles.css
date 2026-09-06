@@ -227,10 +227,16 @@ input[type="search"]::-webkit-search-cancel-button { filter: invert(0.6); }
 .picker-panel {
   background: var(--card); border: 1px solid var(--line);
   border-radius: 14px 14px 0 0; padding: 14px;
-  width: 100%; max-width: 560px; max-height: 80vh;
+  width: 100%; max-width: 560px;
+  /* fixed height, not max-height: the panel is bottom-anchored, so letting it
+     shrink to fit the results made the search box slide down the screen as you
+     typed and the list got shorter */
+  height: 74vh;
   display: flex; flex-direction: column;
 }
-#fp-list { overflow-y: auto; margin-top: 4px; }
+.picker-panel .revise-row { flex: 0 0 auto; }
+.picker-panel .hint { flex: 0 0 auto; }
+#fp-list, #mp-list { flex: 1 1 auto; overflow-y: auto; margin-top: 4px; }
 .fp-row {
   display: flex; align-items: center; gap: 8px; width: 100%;
   background: none; border: none; border-bottom: 1px solid var(--line);
@@ -267,7 +273,14 @@ button.link-food.linked { border-color: var(--accent-dark); color: var(--accent)
 .zone-bulk { color: var(--z-bulk); }
 .zone-over { color: var(--z-over); }
 .mp-when { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
-.maint-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.maint-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.maint-foot .linkish + .linkish { margin-left: 12px; }
+.hint.maint-prompt {
+  color: #eab308; border: 1px solid #eab308; border-radius: 8px;
+  padding: 8px 10px; margin-top: 8px;
+}
+.hint.maint-prompt .linkish { color: #eab308; text-decoration: underline; }
+#rb-pick { flex: 1 1 auto; min-width: 0; margin-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .maint-foot .hint { margin: 4px 0; }
 #mp-list .fp-row { align-items: flex-start; }
 .badge-uplift { font-size: 11px; color: #eab308; margin-top: 4px; }
