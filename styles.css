@@ -244,7 +244,9 @@ input[type="search"]::-webkit-search-cancel-button { filter: invert(0.6); }
   padding: 11px 2px; cursor: pointer;
 }
 .fp-row:last-child { border-bottom: none; }
-.fp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; flex-direction: column; gap: 2px; }
+.f-main, .f-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.f-sub { font-size: 11px; color: var(--dim); }
 button.link-food {
   display: block; width: 100%; text-align: left; cursor: pointer;
   background: var(--bg); border: 1px solid var(--line); border-radius: 8px;

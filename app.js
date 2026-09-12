@@ -378,7 +378,7 @@ function renderFoodPicker() {
   for (const f of hits) {
     const row = document.createElement("button");
     row.className = "fp-row";
-    row.innerHTML = `<span class="fp-name">${esc(f.name)}</span>
+    row.innerHTML = `<span class="fp-name">${foodNameHtml(f)}</span>
       <span class="chip ${f.basis === "label" ? "label" : f.basis === "recipe" ? "weighed" : "recalled"}">${f.basis}</span>
       <span class="f-kcal">${f.per_100g.kcal}/100g</span>`;
     row.addEventListener("click", () => {
@@ -595,12 +595,19 @@ $("#label-input").addEventListener("change", async (ev) => {
   }
 });
 
+// Alias first (it's the name the user actually uses), registered name second.
+const foodAlias = (f) => (f.aliases || []).find(Boolean) || "";
+const foodTitle = (f) => (foodAlias(f) ? `${foodAlias(f)} (${f.name})` : f.name);
+const foodNameHtml = (f) => foodAlias(f)
+  ? `<span class="f-main">${esc(foodAlias(f))}</span><span class="f-sub">${esc(f.name)}</span>`
+  : esc(f.name);
+
 function foodToScanItem(food, grams) {
   const per = food.per_100g;
   const f = grams / 100;
   const provenance = food.basis === "label" ? "label" : food.basis === "recipe" ? "weighed" : "recalled";
   return {
-    name: food.name, grams,
+    name: foodTitle(food), grams,
     base: { portion_g: grams, kcal: per.kcal * f, protein_g: per.protein_g * f, carbs_g: per.carbs_g * f, fat_g: per.fat_g * f },
     est: null, provenance, unc: food.unc ?? UNC[provenance],
     unresolved: false, hidden_factor: null, food_id: food.id, source: "db",
@@ -856,7 +863,7 @@ function renderScanItems() {
       ${match ? `<button class="chip match" data-f="match">use saved: ${match.per_100g.kcal} kcal/100g</button>` : ""}
       <button class="link-food ${it.food_id ? "linked" : ""}" data-f="linkfood">${
         it.food_id
-          ? `🔗 ${esc((foods.find((f) => f.id === it.food_id) || {}).name || "linked food")}`
+          ? `🔗 ${esc(foodTitle(foods.find((f) => f.id === it.food_id) || { name: "linked food" }))}`
           : "🔗 Search saved foods…"
       }</button>
       ${it.uplift ? `<div class="badge-uplift">+${Math.round((it.uplift - 1) * 1000) / 10}% pastry adjustment applied (cut mode)</div>` : ""}
@@ -1723,7 +1730,7 @@ function renderFoodsList() {
     row.className = "food-row";
     const nIng = f.basis === "recipe" ? (f.ingredients || []).length : 0;
     row.innerHTML = `
-      <span class="f-name">${esc(f.name)}${nIng ? `<span class="ing-count">${nIng} ingredients</span>` : ""}</span>
+      <span class="f-name">${foodNameHtml(f)}${nIng ? `<span class="ing-count">${nIng} ingredients</span>` : ""}</span>
       <span class="chip ${f.basis === "label" ? "label" : f.basis === "recipe" ? "weighed" : "recalled"}">${f.basis}</span>
       <span class="f-kcal">${f.per_100g.kcal}/100g</span>
       <button class="del">✕</button>`;
