@@ -345,8 +345,11 @@ $("#new-series-btn").addEventListener("click", async () => {
 
 function renderBackupNag() {
   const last = Number(localStorage.getItem("caltrack_last_backup") || 0);
-  const stale = !last || Date.now() - last > 14 * 86400000;
+  const days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  const stale = !last || days > 14;
   $("#backup-nag").hidden = !stale || log.length === 0;
+  $("#backup-nag").textContent = (last ? `Last backup ${days} days ago` : "No backup yet") +
+    " — everything lives only on this phone. Export one from Settings.";
 }
 
 // ---------- shared food picker ----------
@@ -474,6 +477,19 @@ async function copyEntryToToday(e) {
 }
 
 // ---------- scan / review ----------
+// Any error that escapes a handler is shown, and the busy spinner is cleared,
+// so a failure can never look like "nothing happened".
+function showError(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(showError.timer);
+  showError.timer = setTimeout(() => (t.hidden = true), 6000);
+  $("#scan-status").hidden = true;
+}
+window.addEventListener("error", (e) => showError("Something went wrong: " + (e.message || "unknown error")));
+window.addEventListener("unhandledrejection", (e) => showError("Something went wrong: " + (e.reason?.message || e.reason || "unknown error")));
+
 function startScanView() {
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
   $("#view-scan").hidden = false;
@@ -494,7 +510,7 @@ async function fileToResized(file, maxDim) {
   const img = await new Promise((resolve, reject) => {
     const i = new Image();
     i.onload = () => resolve(i);
-    i.onerror = reject;
+    i.onerror = () => reject(new Error("Could not read that photo (unsupported format?)"));
     i.src = URL.createObjectURL(file);
   });
   const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
@@ -511,11 +527,12 @@ $("#photo-input").addEventListener("change", async (ev) => {
   const file = ev.target.files[0];
   ev.target.value = "";
   if (!file) return;
-  const { dataUrl, base64 } = await fileToResized(file, 1024);
-  $("#scan-preview").src = dataUrl;
   startScanView();
-  setScanBusy("Analyzing your meal…");
+  setScanBusy("Preparing photo…");
   try {
+    const { dataUrl, base64 } = await fileToResized(file, 1024);
+    $("#scan-preview").src = dataUrl;
+    setScanBusy("Analyzing your meal…");
     const result = await LLM.analyzePhoto(base64);
     scanItems = (result.items || []).map((i) => {
       // est stays the model's honest median. The pastry uplift is our policy,
@@ -555,11 +572,12 @@ $("#label-input").addEventListener("change", async (ev) => {
   const file = ev.target.files[0];
   ev.target.value = "";
   if (!file) return;
-  const { base64 } = await fileToResized(file, 1600);
   $("#scan-preview").src = "";
   startScanView();
-  setScanBusy("Reading the label…");
+  setScanBusy("Preparing photo…");
   try {
+    const { base64 } = await fileToResized(file, 1600);
+    setScanBusy("Reading the label…");
     const r = await LLM.analyzeLabel(base64);
     $("#scan-status").hidden = true;
     if (!r.per_100g || !r.per_100g.kcal) {
@@ -570,8 +588,9 @@ $("#label-input").addEventListener("change", async (ev) => {
     const msg = `${r.name}\n${r.per_100g.kcal} kcal / 100g · P ${r.per_100g.protein_g} · C ${r.per_100g.carbs_g} · F ${r.per_100g.fat_g}` +
       (r.unit_g ? `\nUnit: ${r.unit_g} g` : "") + (r.notes ? `\n(${r.notes})` : "");
     if (confirm(`Save to foods?\n\n${msg}`)) {
-      const aliases = (prompt("Aliases (comma-separated, optional):") || "")
-        .split(",").map((s) => s.trim()).filter(Boolean);
+      const aliasText = prompt("Aliases (comma-separated, optional). Cancel = don't save.");
+      if (aliasText === null) { showView("today"); return; }
+      const aliases = aliasText.split(",").map((s) => s.trim()).filter(Boolean);
       const food = {
         id: Data.newId(), name: r.name, aliases, per_100g: r.per_100g,
         basis: "label", unc: UNC.label, note: `label photo ${todayStr()}`,
@@ -953,8 +972,9 @@ async function saveItemToFoods(it) {
   const m = itemMacros(it);
   if (!it.grams || !m.kcal) { alert("Need grams and kcal first."); return; }
   const f = 100 / it.grams;
-  const aliases = (prompt(`Save "${it.name}" to foods.\nAliases (comma-separated, optional):`) || "")
-    .split(",").map((s) => s.trim()).filter(Boolean);
+  const aliasText = prompt(`Save "${it.name}" to foods?\nAliases (comma-separated, optional). Cancel = don't save.`);
+  if (aliasText === null) return;
+  const aliases = aliasText.split(",").map((s) => s.trim()).filter(Boolean);
   const basis = it.provenance === "label" || it.provenance === "weighed" ? "label" : "estimate";
   const food = {
     id: Data.newId(), name: it.name.trim(), aliases,
@@ -1342,7 +1362,7 @@ $("#mifflin-btn").addEventListener("click", () => {
   }
 });
 
-$("#save-profile-btn").addEventListener("click", async () => {
+async function saveProfileFromForm() {
   const targets = (profile?.kcal_targets || DEFAULT_TARGETS).slice();
   document.querySelectorAll("#weekday-targets input").forEach((inp) => {
     targets[Number(inp.dataset.day)] = Number(inp.value) || targets[Number(inp.dataset.day)];
@@ -1369,8 +1389,16 @@ $("#save-profile-btn").addEventListener("click", async () => {
   }
   await Data.saveProfile(profile);
   $("#settings-saved").hidden = false;
-  setTimeout(() => ($("#settings-saved").hidden = true), 1500);
-});
+  clearTimeout(saveProfileFromForm.timer);
+  saveProfileFromForm.timer = setTimeout(() => ($("#settings-saved").hidden = true), 1500);
+}
+$("#save-profile-btn").addEventListener("click", saveProfileFromForm);
+// Edits used to live only in the inputs until "Save targets" was tapped, far
+// below; leaving the tab re-rendered the grid from the stored profile and the
+// week's figures were silently gone.
+for (const sel of ["#weekday-targets", "#maintenance-grid", "#f-prot-target", "#f-cut-mode"]) {
+  $(sel).addEventListener("change", saveProfileFromForm);
+}
 
 // ---------- recipe builder: combine saved ingredients into one food ----------
 // Doubles as the recipe editor — same controls, so a recipe can be reworked
@@ -1668,7 +1696,7 @@ function updateMaintAvg() {
   const avg = maintenanceAvg(arr);
   const filled = arr.filter((x) => x > 0).length;
   $("#maint-avg").textContent = avg
-    ? `Weekly average ${avg} kcal — this is the figure the weight trend checks.`
+    ? `Weekly average ${avg} kcal (only the weight trend uses this average; each day's bar uses that day's own figure).`
     : filled
       ? `${filled} of 7 days filled — complete the week to get an average.`
       : "Not set. Cut and bulk lines need this.";
@@ -1680,12 +1708,14 @@ $("#maint-from-targets").addEventListener("click", () => {
     i.value = t[Number(i.dataset.mday)];
   });
   updateMaintAvg();
+  saveProfileFromForm();
 });
 $("#maint-same").addEventListener("click", () => {
   const first = [...document.querySelectorAll("#maintenance-grid input")].find((i) => i.value);
   if (!first) return alert("Fill in one day first, then this copies it across.");
   document.querySelectorAll("#maintenance-grid input").forEach((i) => (i.value = first.value));
   updateMaintAvg();
+  saveProfileFromForm();
 });
 
 let expandedFoodId = null;
@@ -1938,12 +1968,13 @@ async function reloadCaches() {
 // but cannot draw the lines yet.
 function renderCutModeNote() {
   const on = $("#f-cut-mode").checked;
-  const maint = maintenanceAvg(readMaintenanceGrid()) || 0;
+  const arr = readMaintenanceGrid();
+  const days = WEEKDAYS.filter(([, i]) => arr[i] > 0).map(([l, i]) => `${l} ${arr[i]} (cut ${arr[i] - CUT_DEFICIT})`);
   $("#cut-mode-note").textContent = !on
     ? ""
-    : maint
-      ? `Maintenance ${maint} · cut ${maint - CUT_DEFICIT} kcal. Pastry photo estimates are raised ${PASTRY_UPLIFT * 100}%; the model's own figure is kept and the adjustment is shown on the item and on History.`
-      : "Cut mode is on, but there is no maintenance figure yet — set TDEE above, or let the weight trend derive it on History.";
+    : days.length
+      ? `Per day: ${days.join(" · ")}. Pastry photo estimates are raised ${PASTRY_UPLIFT * 100}%; the model's own figure is kept and the adjustment is shown on the item and on History.`
+      : "Cut mode is on, but no maintenance is set yet — fill the grid above (or tap “use my targets”).";
 }
 $("#f-cut-mode").addEventListener("change", renderCutModeNote);
 

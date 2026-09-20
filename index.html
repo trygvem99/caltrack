@@ -37,10 +37,10 @@
           <button class="btn small" id="delete-weight-btn" title="Remove this weigh-in" hidden>✕</button>
         </div>
         <div class="stat-sub" id="weight-trend"></div>
-        <button class="linkish tiny" id="new-series-btn">new scale / location</button>
+        <button class="btn small" id="new-series-btn" title="Start a fresh weight trend after changing scale or moving">Start new weight series</button>
       </div>
 
-      <div class="hint nag" id="backup-nag" hidden>Backup is stale — export one from Settings.</div>
+      <div class="hint nag" id="backup-nag" hidden></div>
 
       <div class="card" id="today-summary">
         <div class="stat">
@@ -89,6 +89,7 @@
     </section>
 
     <!-- SCAN / REVIEW -->
+    <div id="toast" class="toast" hidden></div>
     <section id="view-scan" class="view" hidden>
       <img id="scan-preview" alt="" />
       <div id="scan-status" class="card center" hidden>
