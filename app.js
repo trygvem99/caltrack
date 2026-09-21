@@ -372,7 +372,7 @@ function renderFoodPicker() {
   const q = ($("#fp-search").value || "").trim().toLowerCase();
   const hits = foods
     .filter((f) => foodMatchesQuery(f, q))
-    .sort((a, b) => ((b.last_used || "") < (a.last_used || "") ? -1 : 1) || a.name.localeCompare(b.name));
+    .sort((a, b) => ((b.last_used || "") < (a.last_used || "") ? -1 : 1) || foodTitle(a).localeCompare(foodTitle(b)));
   $("#fp-count").textContent = foods.length
     ? `${hits.length} of ${foods.length} foods${q ? "" : " · most recently used first"}`
     : "No saved foods yet.";
@@ -588,9 +588,8 @@ $("#label-input").addEventListener("change", async (ev) => {
     const msg = `${r.name}\n${r.per_100g.kcal} kcal / 100g · P ${r.per_100g.protein_g} · C ${r.per_100g.carbs_g} · F ${r.per_100g.fat_g}` +
       (r.unit_g ? `\nUnit: ${r.unit_g} g` : "") + (r.notes ? `\n(${r.notes})` : "");
     if (confirm(`Save to foods?\n\n${msg}`)) {
-      const aliasText = prompt("Aliases (comma-separated, optional). Cancel = don't save.");
-      if (aliasText === null) { showView("today"); return; }
-      const aliases = aliasText.split(",").map((s) => s.trim()).filter(Boolean);
+      const aliases = (prompt("Aliases (comma-separated, optional):") || "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
       const food = {
         id: Data.newId(), name: r.name, aliases, per_100g: r.per_100g,
         basis: "label", unc: UNC.label, note: `label photo ${todayStr()}`,
@@ -1744,7 +1743,7 @@ function renderFoodsList() {
   const q = ($("#foods-search").value || "").trim().toLowerCase();
   const sorted = foods
     .filter((f) => (!foodsFilterBasis || f.basis === foodsFilterBasis) && foodMatchesQuery(f, q))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => foodTitle(a).localeCompare(foodTitle(b)));
 
   $("#foods-count").textContent =
     q || foodsFilterBasis
