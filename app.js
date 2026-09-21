@@ -1729,7 +1729,9 @@ function foodMatchesQuery(f, q) {
     ...(f.aliases || []),
     ...((f.ingredients || []).map((i) => i.name)),
   ].join(" ").toLowerCase();
-  return q.split(/\s+/).filter(Boolean).every((term) => hay.includes(term));
+  // "eggs" must find "First Price egg": a term with its trailing s removed counts too
+  const hit = (t) => hay.includes(t) || (t.length > 3 && t.endsWith("s") && hay.includes(t.slice(0, -1)));
+  return q.split(/\s+/).filter(Boolean).every(hit);
 }
 
 function renderFoodsList() {
