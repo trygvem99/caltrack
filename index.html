@@ -286,7 +286,23 @@
       </div>
 
       <div class="card">
-        <h2>Backup</h2>
+        <h2>Cloud backup</h2>
+        <p class="hint">Every change is copied to a file in a <b>private</b> GitHub repository on your account, so a phone that loses its browser storage can be restored. Needs a fine-grained token with <b>Contents: read and write</b> on that one repository only.</p>
+        <label>Repository (owner/name)<input type="text" id="f-gh-repo" placeholder="trygvem99/caltrack-data" autocomplete="off" autocapitalize="off" /></label>
+        <div class="weight-row">
+          <input type="password" id="f-gh-token" placeholder="github_pat_…" autocomplete="off" />
+          <button class="btn small" id="save-gh-btn">Connect</button>
+        </div>
+        <p class="hint" id="cloud-status"></p>
+        <div class="btn-row" id="cloud-actions" hidden>
+          <button class="btn small" id="cloud-upload-btn">Back up now</button>
+          <button class="btn small" id="cloud-restore-btn">Restore from cloud</button>
+          <button class="linkish tiny" id="cloud-forget-btn">disconnect</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Backup file</h2>
         <p class="hint" id="last-backup-line"></p>
         <div class="btn-row">
           <button class="btn" id="backup-btn">Backup</button>
@@ -300,6 +316,7 @@
 
   <script src="math.js"></script>
   <script src="db.js"></script>
+  <script src="cloud.js"></script>
   <script src="llm.js"></script>
   <script src="app.js"></script>
 </body>

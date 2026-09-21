@@ -7,6 +7,7 @@ const DB = (() => {
   const NAME = "caltrack";
   const VERSION = 1;
   let _db = null;
+  let writeListener = null; // called after every completed readwrite transaction
 
   function open() {
     if (_db) return Promise.resolve(_db);
@@ -31,7 +32,10 @@ const DB = (() => {
     return open().then((db) => new Promise((resolve, reject) => {
       const t = db.transaction(store, mode);
       const result = fn(t.objectStore(store));
-      t.oncomplete = () => resolve(result instanceof IDBRequest ? result.result : result);
+      t.oncomplete = () => {
+        resolve(result instanceof IDBRequest ? result.result : result);
+        if (mode === "readwrite" && writeListener) writeListener(store);
+      };
       t.onerror = () => reject(t.error);
     }));
   }
@@ -46,7 +50,7 @@ const DB = (() => {
     tx(store, "readonly", (s) => s.index(index).getAll(value));
   const add = (store, value) => tx(store, "readwrite", (s) => s.add(value));
 
-  return { open, put, bulkPut, del, clear, get, getAll, getAllByIndex, add };
+  return { open, put, bulkPut, del, clear, get, getAll, getAllByIndex, add, onWrite: (fn) => (writeListener = fn) };
 })();
 
 const Data = (() => {
@@ -81,15 +85,19 @@ const Data = (() => {
   const saveProfile = (value) => DB.put("profile", { key: "profile", value });
 
   // ---- backup / restore / legacy import ----
-  async function exportBackup() {
+  // Everything, in the shape restoreBackup() takes back. No keys or tokens.
+  async function snapshot() {
     const stores = {};
     for (const s of STORES) stores[s] = await DB.getAll(s);
-    const payload = {
+    return {
       app: "caltrack", format: 1,
       exported_at: new Date().toISOString(),
       api_key_present: !!localStorage.getItem("caltrack_api_key"),
       stores,
     };
+  }
+  async function exportBackup() {
+    const payload = await snapshot();
     const name = `caltrack-backup-${payload.exported_at.slice(0, 10)}.json`;
     const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
     const file = new File([blob], name, { type: "application/json" });
@@ -132,7 +140,7 @@ const Data = (() => {
 
   return {
     init, newId, getProfile, saveProfile,
-    exportBackup, restoreBackup, importLegacy,
+    snapshot, exportBackup, restoreBackup, importLegacy,
     log: {
       all: () => DB.getAll("log"),
       byDate: (d) => DB.getAllByIndex("log", "date", d),

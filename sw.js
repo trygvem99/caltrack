@@ -1,7 +1,7 @@
 // Network-first with cache fallback: offline works, and new deploys are picked
 // up automatically without a cache-name bump per deploy.
-const CACHE = "caltrack-v3";
-const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./math.js", "./db.js", "./llm.js", "./manifest.webmanifest", "./icon.svg", "./seed/foods.json"];
+const CACHE = "caltrack-v4";
+const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./math.js", "./db.js", "./cloud.js", "./llm.js", "./manifest.webmanifest", "./icon.svg", "./seed/foods.json"];
 
 self.addEventListener("install", (e) => {
   // addAll() also reads through the HTTP cache, so without cache:"reload" the

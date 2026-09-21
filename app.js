@@ -1334,6 +1334,7 @@ function renderSettings() {
 
   renderFoodsList();
   renderSeriesList();
+  renderCloudStatus();
 
   const last = Number(localStorage.getItem("caltrack_last_backup") || 0);
   $("#last-backup-line").textContent = last ? `Last backup: ${new Date(last).toLocaleDateString()}` : "No backup yet — data lives only on this phone.";
@@ -1899,6 +1900,86 @@ function renderSeriesList() {
     }).join("");
 }
 
+// ---------- cloud backup ----------
+function renderCloudStatus() {
+  const st = Cloud.status();
+  $("#cloud-actions").hidden = !st.enabled;
+  $("#f-gh-repo").value = st.repo || $("#f-gh-repo").value;
+  const el = $("#cloud-status");
+  el.classList.toggle("nag", !!(st.blocked || st.lastError));
+  if (!st.enabled) { el.textContent = "Off — connect a repository above."; return; }
+  const c = st.cloud;
+  const cloudTxt = c && c.exported_at ? `cloud copy ${new Date(c.exported_at).toLocaleString()} · ${c.log} meals, ${c.foods} foods` : c ? "no backup in the cloud yet" : "not checked yet";
+  if (st.blocked) {
+    el.textContent = `PAUSED: the cloud has ${c.log} meals but this phone has ${log.length}. Automatic upload is held so the cloud copy is not overwritten — use “Restore from cloud”, or “Back up now” to overwrite it on purpose.`;
+  } else if (st.lastError) {
+    el.textContent = `Last upload failed: ${st.lastError} (${cloudTxt})`;
+  } else if (st.busy) {
+    el.textContent = "Uploading…";
+  } else {
+    el.textContent = `Connected to ${st.repo} · ${cloudTxt}`;
+  }
+}
+Cloud.onChange(renderCloudStatus);
+
+$("#save-gh-btn").addEventListener("click", async () => {
+  const tok = $("#f-gh-token").value.trim(), rep = $("#f-gh-repo").value.trim();
+  if (!tok || !rep.includes("/")) return alert("Need both the repository (owner/name) and a token.");
+  const btn = $("#save-gh-btn");
+  btn.disabled = true;
+  try {
+    await Cloud.setup(tok, rep);
+    $("#f-gh-token").value = "";
+    Cloud.schedule();
+    await maybeRestoreFromCloud();
+  } catch (e) {
+    Cloud.forget();
+    alert("Could not connect: " + e.message + "\n\nCheck that the repository exists and the token has Contents read/write on it.");
+  }
+  btn.disabled = false;
+  renderCloudStatus();
+});
+$("#cloud-upload-btn").addEventListener("click", async () => {
+  const st = Cloud.status();
+  const force = st.blocked && confirm(`Overwrite the cloud copy (${st.cloud.log} meals) with this phone's ${log.length} meals?`);
+  if (st.blocked && !force) return;
+  try { await Cloud.upload(await Data.snapshot(), { force }); }
+  catch (e) { alert("Upload failed: " + e.message); }
+  renderCloudStatus();
+});
+$("#cloud-restore-btn").addEventListener("click", async () => {
+  try {
+    const snap = await Cloud.download();
+    if (!snap) return alert("There is no backup in the cloud yet.");
+    const c = Cloud.status().cloud;
+    if (!confirm(`Replace everything on this phone with the cloud copy from ${new Date(c.exported_at).toLocaleString()} (${c.log} meals, ${c.foods} foods)?`)) return;
+    await Data.restoreBackup(snap);
+    location.reload();
+  } catch (e) {
+    alert("Restore failed: " + e.message);
+  }
+});
+$("#cloud-forget-btn").addEventListener("click", () => {
+  if (!confirm("Disconnect cloud backup? The copy on GitHub is kept; only this phone stops uploading.")) return;
+  Cloud.forget();
+  renderCloudStatus();
+});
+
+// The case this whole module exists for: the phone's storage was evicted, the
+// app came up empty, and the cloud still has everything.
+async function maybeRestoreFromCloud() {
+  if (!Cloud.enabled()) return false;
+  const snap = await Cloud.download();
+  const c = Cloud.status().cloud;
+  if (!snap || !c.log || log.length > 0) return false;
+  if (!confirm(`The cloud backup from ${new Date(c.exported_at).toLocaleString()} has ${c.log} meals and ${c.foods} foods; this phone has none.
+
+Restore it now?`)) return false;
+  await Data.restoreBackup(snap);
+  location.reload();
+  return true;
+}
+
 // ---------- backup / restore ----------
 $("#backup-btn").addEventListener("click", async () => {
   await Data.exportBackup();
@@ -1962,6 +2043,9 @@ async function reloadCaches() {
   logDate = todayStr();
   const hasKey = !!localStorage.getItem("caltrack_api_key");
   showView(hasKey ? "today" : "settings");
+  DB.onWrite(() => Cloud.schedule());
+  try { await maybeRestoreFromCloud(); } catch (e) { console.warn("cloud check failed:", e); }
+  Cloud.schedule();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 })();
 
