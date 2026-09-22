@@ -288,8 +288,8 @@
 
       <div class="card">
         <h2>Cloud backup</h2>
-        <p class="hint">Every change is copied to a file in a <b>private</b> GitHub repository on your account, so a phone that loses its browser storage can be restored. Needs a fine-grained token with <b>Contents: read and write</b> on that one repository only.</p>
-        <label>Repository (owner/name)<input type="text" id="f-gh-repo" placeholder="trygvem99/caltrack-data" autocomplete="off" autocapitalize="off" /></label>
+        <p class="hint">Every change is copied to a file in a <b>private</b> GitHub repository on your account, so a phone that loses its browser storage can be restored. Needs a fine-grained token with <b>Contents: read and write</b> on that one repository only. The repository must be private — this backup holds your meals and weights, and a public one would publish them.</p>
+        <label>Repository (owner/name)<input type="text" id="f-gh-repo" value="trygvem99/caltrack-data" autocomplete="off" autocapitalize="off" /></label>
         <div class="weight-row">
           <input type="password" id="f-gh-token" placeholder="github_pat_…" autocomplete="off" />
           <button class="btn small" id="save-gh-btn">Connect</button>

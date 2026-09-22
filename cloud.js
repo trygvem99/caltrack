@@ -14,6 +14,7 @@ const Cloud = (() => {
   const enabled = () => !!(token() && repo());
 
   let timer = null, busy = false, dirty = false, blocked = false, lastError = null;
+  let isPublic = false; // a public repo must never receive this file
   let cloud = null; // what is on GitHub, once looked at: {log, foods, exported_at, sha}
   const listeners = [];
   const notify = () => listeners.forEach((f) => f());
@@ -51,6 +52,14 @@ const Cloud = (() => {
     exported_at: snap.exported_at || null,
   });
 
+  // Refuses a public repository. The backup holds meals and body weights, and
+  // the app repo itself is public — pointing at it publishes all of that.
+  async function assertPrivate() {
+    const info = await gh(`/repos/${repo()}`);
+    isPublic = !info.private;
+    if (isPublic) throw new Error(`${repo()} is a PUBLIC repository — backups would be readable by anyone. Use a private repository.`);
+  }
+
   // Returns the cloud snapshot, or null when the repo has no backup yet.
   async function download() {
     let meta;
@@ -71,6 +80,7 @@ const Cloud = (() => {
     if (busy) { dirty = true; return; }
     busy = true; notify();
     try {
+      await assertPrivate();
       for (let attempt = 0; attempt < 2; attempt++) {
         if (!cloud) await download();
         const local = counts(snap);
@@ -117,7 +127,10 @@ const Cloud = (() => {
     localStorage.setItem(KEY_TOKEN, tok.trim());
     localStorage.setItem(KEY_REPO, rep.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\/+$/, ""));
     cloud = null; lastError = null; blocked = false;
-    await download(); // validates the token and repo in one call
+    try {
+      await assertPrivate();
+      await download(); // validates the token and path in one call
+    } catch (e) { forget(); throw e; }
     notify();
   }
   function forget() {
@@ -127,7 +140,7 @@ const Cloud = (() => {
     notify();
   }
   const status = () => ({
-    enabled: enabled(), repo: repo(), busy, blocked, lastError, cloud,
+    enabled: enabled(), repo: repo(), busy, blocked, lastError, cloud, isPublic,
     lastAt: Number(localStorage.getItem("caltrack_last_backup") || 0),
   });
 

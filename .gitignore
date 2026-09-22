@@ -3,3 +3,4 @@ data/
 legacy.json
 node_modules/
 .env.example
+caltrack-backup.json

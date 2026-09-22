@@ -1,6 +1,6 @@
 // Network-first with cache fallback: offline works, and new deploys are picked
 // up automatically without a cache-name bump per deploy.
-const CACHE = "caltrack-v5";
+const CACHE = "caltrack-v6";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./math.js", "./db.js", "./cloud.js", "./llm.js", "./manifest.webmanifest", "./icon.svg", "./seed/foods.json"];
 
 self.addEventListener("install", (e) => {

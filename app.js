@@ -1914,6 +1914,8 @@ function renderCloudStatus() {
   const cloudTxt = c && c.exported_at ? `cloud copy ${new Date(c.exported_at).toLocaleString()} · ${c.log} meals, ${c.foods} foods` : c ? "no backup in the cloud yet" : "not checked yet";
   if (st.blocked) {
     el.textContent = `PAUSED: the cloud has ${c.log} meals but this phone has ${log.length}. Automatic upload is held so the cloud copy is not overwritten — use “Restore from cloud”, or “Back up now” to overwrite it on purpose.`;
+  } else if (st.isPublic) {
+    el.textContent = `STOPPED: ${st.repo} is public. Uploads are refused. Disconnect and reconnect with a private repository.`;
   } else if (st.lastError) {
     el.textContent = `Last upload failed: ${st.lastError} (${cloudTxt})`;
   } else if (st.busy) {
@@ -1935,7 +1937,6 @@ $("#save-gh-btn").addEventListener("click", async () => {
     Cloud.schedule();
     await maybeRestoreFromCloud();
   } catch (e) {
-    Cloud.forget();
     alert("Could not connect: " + e.message + "\n\nCheck that the repository exists and the token has Contents read/write on it.");
   }
   btn.disabled = false;
