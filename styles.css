@@ -124,10 +124,10 @@ main { padding: 16px; max-width: 560px; margin: 0 auto; }
 /* settings */
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0; }
 label { display: block; font-size: 13px; color: var(--dim); margin: 8px 0; }
-input, select {
+input, select, textarea {
   width: 100%; margin-top: 4px; padding: 9px 10px;
   background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
-  color: var(--text); font-size: 15px;
+  color: var(--text); font-size: 16px; /* below 16px iOS zooms the page on focus */
 }
 input[type="range"] { padding: 0; accent-color: var(--accent); }
 
@@ -301,3 +301,9 @@ button.link-food.linked { border-color: var(--accent-dark); color: var(--accent)
 #new-series-btn { margin-top: 8px; }
 
 #load-warning { display: block; width: 100%; text-align: left; background: none; border: 1px solid var(--warn); border-radius: 8px; padding: 9px 10px; cursor: pointer; }
+
+/* Zoom is locked: the meta tag covers Android, these cover iOS, which ignores
+   user-scalable. Double-tap and pinch are both handled in app.js. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: pan-x pan-y; }
+body { touch-action: pan-x pan-y; }
+#boot { margin-top: 40px; }

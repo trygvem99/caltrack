@@ -1902,6 +1902,20 @@ function renderSeriesList() {
 
 $("#load-warning").addEventListener("click", () => location.reload());
 
+// ---------- zoom lock ----------
+// iOS ignores user-scalable=no, so pinch and double-tap are cancelled here.
+// Inputs are 16px in the stylesheet, which is what stops focus-zoom.
+for (const ev of ["gesturestart", "gesturechange", "gestureend"]) {
+  document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+}
+document.addEventListener("touchmove", (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener("touchend", (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd < 300) e.preventDefault(); // second tap of a double-tap
+  lastTouchEnd = now;
+}, { passive: false });
+
 // ---------- cloud backup ----------
 function renderCloudStatus() {
   const st = Cloud.status();
@@ -2026,27 +2040,36 @@ const readCounts = () => { try { return JSON.parse(localStorage.getItem(COUNTS_K
 const writeCounts = () => localStorage.setItem(COUNTS_KEY, JSON.stringify({ log: log.length, foods: foods.length, weights: weights.length }));
 
 async function loadOnce() {
-  [log, foods, weights, series, corrections] = await Promise.all([
+  [log, foods, weights, series, corrections] = await DB.withTimeout(Promise.all([
     Data.log.all(), Data.foods.all(), Data.weights.all(), Data.series.all(), Data.corrections.all(),
-  ]);
-  profile = await Data.getProfile();
+  ]), 4000, "Loading your data");
+  profile = await DB.withTimeout(Data.getProfile(), 4000, "Loading your profile");
 }
 
 // On a cold start WebKit sometimes returns empty stores from a database that is
 // not actually empty — the app looked wiped until the user reloaded by hand.
 // Re-open and retry while the counts are short of what this phone last held.
 async function reloadCaches({ retry = false } = {}) {
-  await loadOnce();
-  if (!retry) { writeCounts(); return; }
+  if (!retry) { await loadOnce(); writeCounts(); return; }
   const want = readCounts();
-  for (let i = 0; i < 3 && (log.length < (want.log || 0) || foods.length < (want.foods || 0)); i++) {
-    DB.close();
-    await new Promise((r) => setTimeout(r, 150 * (i + 1)));
-    await loadOnce();
+  const short = () => log.length < (want.log || 0) || foods.length < (want.foods || 0);
+  let failed = null;
+  for (let i = 0; i < 4; i++) {
+    try {
+      await loadOnce();
+      failed = null;
+      if (!short()) break;
+    } catch (e) {
+      failed = e; // aborted or timed out — retrying is the whole point
+    }
+    if (i < 3) {
+      DB.close();
+      await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+    }
   }
-  const short = log.length < (want.log || 0) || foods.length < (want.foods || 0);
-  $("#load-warning").hidden = !short;
-  if (short) {
+  if (failed) throw failed;
+  $("#load-warning").hidden = !short();
+  if (short()) {
     $("#load-warning").textContent =
       `This phone held ${want.log} meals and ${want.foods} foods, but only ${log.length} and ${foods.length} loaded. Nothing has been deleted — tap to try again.`;
   } else {
@@ -2072,9 +2095,12 @@ async function reloadCaches({ retry = false } = {}) {
     }
   } catch (e) {
     console.error(e);
-    alert("Storage init failed: " + e.message);
+    const w = $("#load-warning");
+    w.hidden = false;
+    w.textContent = `${e.message}. Your data has not been deleted — tap to try again.`;
   }
   logDate = todayStr();
+  $("#boot").hidden = true;
   const hasKey = !!localStorage.getItem("caltrack_api_key");
   showView(hasKey ? "today" : "settings");
   DB.onWrite(() => { writeCounts(); Cloud.schedule(); });

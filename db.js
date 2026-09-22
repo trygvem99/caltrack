@@ -7,12 +7,15 @@ const DB = (() => {
   const NAME = "caltrack";
   const VERSION = 1;
   let _db = null;
+  let _opening = null; // in-flight open; without it parallel reads each opened the database
   let writeListener = null; // called after every completed readwrite transaction
 
   function open() {
     if (_db) return Promise.resolve(_db);
-    return new Promise((resolve, reject) => {
+    if (_opening) return _opening;
+    _opening = new Promise((resolve, reject) => {
       const req = indexedDB.open(NAME, VERSION);
+      req.onblocked = () => reject(new Error("IndexedDB open blocked by another tab"));
       req.onupgradeneeded = () => {
         const db = req.result;
         const log = db.createObjectStore("log", { keyPath: "id" });
@@ -23,9 +26,17 @@ const DB = (() => {
         db.createObjectStore("corrections", { keyPath: "id", autoIncrement: true });
         db.createObjectStore("profile", { keyPath: "key" });
       };
-      req.onsuccess = () => { _db = req.result; resolve(_db); };
+      req.onsuccess = () => {
+        _db = req.result;
+        // iOS closes connections out from under a backgrounded app; drop the
+        // handle so the next call opens a fresh one instead of using a corpse.
+        _db.onclose = () => { _db = null; };
+        resolve(_db);
+      };
       req.onerror = () => reject(req.error);
     });
+    _opening.catch(() => {}).then(() => { _opening = null; });
+    return _opening;
   }
 
   function tx(store, mode, fn) {
@@ -36,7 +47,11 @@ const DB = (() => {
         resolve(result instanceof IDBRequest ? result.result : result);
         if (mode === "readwrite" && writeListener) writeListener(store);
       };
-      t.onerror = () => reject(t.error);
+      t.onerror = () => reject(t.error || new Error("IndexedDB transaction failed"));
+      // WebKit aborts transactions while a cold-started app is still settling.
+      // Without this the promise never settled, startup awaited it forever, and
+      // the pre-rendered empty Today screen was all the user ever saw.
+      t.onabort = () => { close(); reject(t.error || new Error("IndexedDB transaction aborted")); };
     }));
   }
 
@@ -55,7 +70,12 @@ const DB = (() => {
   // the only way to get a good one.
   function close() { if (_db) { try { _db.close(); } catch {} _db = null; } }
 
-  return { open, close, put, bulkPut, del, clear, get, getAll, getAllByIndex, add, onWrite: (fn) => (writeListener = fn) };
+  // Nothing in IndexedDB may hang startup: a request that neither completes nor
+  // errors is turned into a failure so the caller can retry.
+  const withTimeout = (p, ms, what) =>
+    Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what + " timed out")), ms))]);
+
+  return { open, close, withTimeout, put, bulkPut, del, clear, get, getAll, getAllByIndex, add, onWrite: (fn) => (writeListener = fn) };
 })();
 
 const Data = (() => {
