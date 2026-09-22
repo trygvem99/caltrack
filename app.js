@@ -1900,6 +1900,8 @@ function renderSeriesList() {
     }).join("");
 }
 
+$("#load-warning").addEventListener("click", () => location.reload());
+
 // ---------- cloud backup ----------
 function renderCloudStatus() {
   const st = Cloud.status();
@@ -1972,6 +1974,9 @@ async function maybeRestoreFromCloud() {
   const snap = await Cloud.download();
   const c = Cloud.status().cloud;
   if (!snap || !c.log || log.length > 0) return false;
+  // An empty read that contradicts the count record is a failed read, not a
+  // wiped phone; restoring over it could bury data that is still there.
+  if (readCounts().log > 0) return false;
   if (!confirm(`The cloud backup from ${new Date(c.exported_at).toLocaleString()} has ${c.log} meals and ${c.foods} foods; this phone has none.
 
 Restore it now?`)) return false;
@@ -2013,17 +2018,45 @@ $("#restore-input").addEventListener("change", async (ev) => {
 });
 
 // ---------- init ----------
-async function reloadCaches() {
+// The last counts this phone is known to hold, kept outside IndexedDB so an
+// IndexedDB that comes up empty can be recognised as wrong rather than trusted.
+const COUNTS_KEY = "caltrack_counts";
+const readCounts = () => { try { return JSON.parse(localStorage.getItem(COUNTS_KEY)) || {}; } catch { return {}; } };
+const writeCounts = () => localStorage.setItem(COUNTS_KEY, JSON.stringify({ log: log.length, foods: foods.length, weights: weights.length }));
+
+async function loadOnce() {
   [log, foods, weights, series, corrections] = await Promise.all([
     Data.log.all(), Data.foods.all(), Data.weights.all(), Data.series.all(), Data.corrections.all(),
   ]);
   profile = await Data.getProfile();
 }
 
+// On a cold start WebKit sometimes returns empty stores from a database that is
+// not actually empty — the app looked wiped until the user reloaded by hand.
+// Re-open and retry while the counts are short of what this phone last held.
+async function reloadCaches({ retry = false } = {}) {
+  await loadOnce();
+  if (!retry) { writeCounts(); return; }
+  const want = readCounts();
+  for (let i = 0; i < 3 && (log.length < (want.log || 0) || foods.length < (want.foods || 0)); i++) {
+    DB.close();
+    await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+    await loadOnce();
+  }
+  const short = log.length < (want.log || 0) || foods.length < (want.foods || 0);
+  $("#load-warning").hidden = !short;
+  if (short) {
+    $("#load-warning").textContent =
+      `This phone held ${want.log} meals and ${want.foods} foods, but only ${log.length} and ${foods.length} loaded. Nothing has been deleted — tap to try again.`;
+  } else {
+    writeCounts();
+  }
+}
+
 (async function init() {
   try {
     await Data.init();
-    await reloadCaches();
+    await reloadCaches({ retry: true });
     if (!profile) {
       profile = {
         kcal_targets: DEFAULT_TARGETS.slice(), protein_target: 160,
@@ -2043,7 +2076,7 @@ async function reloadCaches() {
   logDate = todayStr();
   const hasKey = !!localStorage.getItem("caltrack_api_key");
   showView(hasKey ? "today" : "settings");
-  DB.onWrite(() => Cloud.schedule());
+  DB.onWrite(() => { writeCounts(); Cloud.schedule(); });
   try { await maybeRestoreFromCloud(); } catch (e) { console.warn("cloud check failed:", e); }
   Cloud.schedule();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

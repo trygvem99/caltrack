@@ -50,7 +50,12 @@ const DB = (() => {
     tx(store, "readonly", (s) => s.index(index).getAll(value));
   const add = (store, value) => tx(store, "readwrite", (s) => s.add(value));
 
-  return { open, put, bulkPut, del, clear, get, getAll, getAllByIndex, add, onWrite: (fn) => (writeListener = fn) };
+  // Drops the handle so the next call re-opens the database. WebKit can hand
+  // back a connection whose stores read empty on a cold start; re-opening is
+  // the only way to get a good one.
+  function close() { if (_db) { try { _db.close(); } catch {} _db = null; } }
+
+  return { open, close, put, bulkPut, del, clear, get, getAll, getAllByIndex, add, onWrite: (fn) => (writeListener = fn) };
 })();
 
 const Data = (() => {

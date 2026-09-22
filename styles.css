@@ -299,3 +299,5 @@ button.link-food.linked { border-color: var(--accent-dark); color: var(--accent)
   font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.4);
 }
 #new-series-btn { margin-top: 8px; }
+
+#load-warning { display: block; width: 100%; text-align: left; background: none; border: 1px solid var(--warn); border-radius: 8px; padding: 9px 10px; cursor: pointer; }
