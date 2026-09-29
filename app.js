@@ -94,8 +94,11 @@ const seriesForDate = (date) => {
   const s = series.filter((x) => !x.legacy && x.start <= date).sort((a, b) => (a.start < b.start ? 1 : -1));
   return s[0] || null;
 };
+// Comparators must return 0 for equal keys: anything else makes ties order
+// arbitrarily (and silently kills a tiebreak chained after ||).
+const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const seriesWeights = (s) =>
-  weights.filter((w) => w.series === s.id).sort((a, b) => (a.date < b.date ? -1 : 1));
+  weights.filter((w) => w.series === s.id).sort((a, b) => cmp(a.date, b.date));
 
 // ---------- views ----------
 function showView(name) {
@@ -150,7 +153,8 @@ function renderToday() {
   $("#tier-line").textContent = tierLine(logDate);
 
   const list = $("#meal-list");
-  const entries = dayEntries(logDate).sort((a, b) => (a.time < b.time ? -1 : 1));
+  // id breaks ties so two meals logged in the same minute keep a fixed order
+  const entries = dayEntries(logDate).sort((a, b) => cmp(a.time, b.time) || cmp(a.id, b.id));
   list.innerHTML = entries.length ? "" : `<div class="empty">Nothing logged ${logDate === todayStr() ? "yet" : "for this day"}.</div>`;
   for (const e of entries) list.appendChild(mealCard(e));
 }
@@ -372,7 +376,7 @@ function renderFoodPicker() {
   const q = ($("#fp-search").value || "").trim().toLowerCase();
   const hits = foods
     .filter((f) => foodMatchesQuery(f, q))
-    .sort((a, b) => ((b.last_used || "") < (a.last_used || "") ? -1 : 1) || foodTitle(a).localeCompare(foodTitle(b)));
+    .sort((a, b) => cmp(b.last_used || "", a.last_used || "") || foodTitle(a).localeCompare(foodTitle(b)));
   $("#fp-count").textContent = foods.length
     ? `${hits.length} of ${foods.length} foods${q ? "" : " · most recently used first"}`
     : "No saved foods yet.";
@@ -636,7 +640,7 @@ function foodToScanItem(food, grams) {
 // Most-recently-used first, capped so the per-call cost can't creep upward.
 function foodsDigest() {
   return foods
-    .slice().sort((a, b) => ((b.last_used || "") < (a.last_used || "") ? -1 : 1))
+    .slice().sort((a, b) => cmp(b.last_used || "", a.last_used || "") || cmp(a.name, b.name))
     .slice(0, 100)
     .map((f) => `${f.id} | ${f.name} | ${(f.aliases || []).join(",")} | ${f.per_100g.kcal} kcal/100g | ${f.default_g || 100}`)
     .join("\n") || "(empty)";
@@ -912,6 +916,7 @@ function renderScanItems() {
       const applied = foodToScanItem(food, it.grams);
       Object.assign(it, applied, {
         grams: it.grams, est: it.est, hidden_factor: it.hidden_factor, unresolved: false,
+        uplift: null, is_pastry: false, // label data replaces the estimate the uplift was applied to
       });
       renderScanItems();
     };
@@ -1438,7 +1443,7 @@ function closeRecipeBuilder() {
 
 function renderRecipeBuilder() {
   $("#rb-pick").textContent = rbPicked
-    ? `🔍 ${rbPicked.name} — ${rbPicked.per_100g.kcal}/100g`
+    ? `🔍 ${foodTitle(rbPicked)} — ${rbPicked.per_100g.kcal}/100g`
     : "🔍 Search saved foods…";
   $("#rb-pick").classList.toggle("linked", !!rbPicked);
 
@@ -1969,7 +1974,10 @@ $("#cloud-restore-btn").addEventListener("click", async () => {
     const snap = await Cloud.download();
     if (!snap) return alert("There is no backup in the cloud yet.");
     const c = Cloud.status().cloud;
-    if (!confirm(`Replace everything on this phone with the cloud copy from ${new Date(c.exported_at).toLocaleString()} (${c.log} meals, ${c.foods} foods)?`)) return;
+    if (!confirm(`Replace everything on this phone with the cloud copy from ${new Date(c.exported_at).toLocaleString()} (${c.log} meals, ${c.foods} foods)?
+
+A copy of what is on this phone now will be saved first.`)) return;
+    if (log.length) await Data.exportBackup();
     await Data.restoreBackup(snap);
     location.reload();
   } catch (e) {

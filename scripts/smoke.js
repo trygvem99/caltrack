@@ -79,7 +79,33 @@
     }
   }
 
-  // 5. A failure must be visible, never a silent return to the same screen.
+  // 5. Ordering must be deterministic. Comparators that never return 0 put
+  //    equal keys in an arbitrary order that can change between renders, and
+  //    silently disable any tiebreak chained after them.
+  function stableOrder() {
+    const sig = () => [...document.querySelectorAll("#fp-list .fp-row")].map((r) => r.textContent).join("|");
+    openFoodPicker(() => {});
+    renderFoodPicker();
+    const first = sig();
+    renderFoodPicker();
+    check(sig() === first, "food picker order changes between identical renders");
+    closeFoodPicker();
+
+    // ties must fall back to the name, which the old comparator never reached
+    const saved = foods.slice();
+    foods = [
+      { id: "z", name: "Zucchini", aliases: [], basis: "label", per_100g: { kcal: 17 }, last_used: "2026-01-01" },
+      { id: "a", name: "Apple", aliases: [], basis: "label", per_100g: { kcal: 52 }, last_used: "2026-01-01" },
+    ];
+    openFoodPicker(() => {});
+    renderFoodPicker();
+    const names = [...document.querySelectorAll("#fp-list .fp-name")].map((n) => n.textContent);
+    check(names[0] === "Apple" && names[1] === "Zucchini", `equal last_used must sort by name, got ${names.join(", ")}`);
+    closeFoodPicker();
+    foods = saved;
+  }
+
+  // 6. A failure must be visible, never a silent return to the same screen.
   function errorsAreVisible() {
     const t = document.querySelector("#toast");
     check(!!t && typeof showError === "function", "no error surface");
@@ -120,13 +146,14 @@
     }
 
     if (typeof profile !== "undefined" && profile) await maintenanceRoundTrip();
+    stableOrder();
     errorsAreVisible();
 
     // return a copy: `fail` is reused and cleared by the next run, which would
     // otherwise empty the failure list a caller is still holding
     return fail.length
       ? { ok: false, failures: fail.slice() }
-      : { ok: true, checks: "hidden/reachable/overflow across today, history, settings, review; maintenance round-trip; error surface" };
+      : { ok: true, checks: "hidden/reachable/overflow across today, history, settings, review; maintenance round-trip; stable ordering; error surface" };
   }
 
   global.CalSmoke = { run };
