@@ -1412,19 +1412,25 @@ let rbIngredients = [];
 let rbEditingId = null;
 let rbPicked = null;   // food chosen through the searchable picker
 
-function openRecipeBuilder(existing) {
-  rbEditingId = existing ? existing.id : null;
-  rbIngredients = existing ? JSON.parse(JSON.stringify(existing.ingredients || [])) : [];
+// `draft` is either a saved recipe (editing) or a scanned one with no id.
+function openRecipeBuilder(draft, opts = {}) {
+  const editing = !!(draft && draft.id);
+  rbEditingId = editing ? draft.id : null;
+  rbIngredients = draft ? JSON.parse(JSON.stringify(draft.ingredients || [])) : [];
   rbPicked = null;
-  $("#rb-heading").textContent = existing ? "Edit recipe" : "New recipe";
-  $("#rb-save").textContent = existing ? "Save changes" : "Save recipe";
-  $("#rb-name").value = existing ? existing.name : "";
-  $("#rb-aliases").value = existing ? (existing.aliases || []).join(", ") : "";
-  $("#rb-default").value = existing ? existing.default_g || 100 : 100;
+  $("#rb-heading").textContent = editing ? "Edit recipe" : opts.scanned ? "From your screenshot" : "New recipe";
+  $("#rb-save").textContent = editing ? "Save changes" : "Save recipe";
+  $("#rb-name").value = (draft && draft.name) || "";
+  $("#rb-aliases").value = ((draft && draft.aliases) || []).join(", ");
+  $("#rb-default").value = (draft && draft.default_g) || 100;
   $("#rb-grams").value = "";
-  $("#rb-total").value = existing ? existing.total_g : "";
-  if (existing) $("#rb-total").dataset.touched = "1";
-  else delete $("#rb-total").dataset.touched;
+  $("#rb-total").value = (draft && draft.total_g) || "";
+  $("#rb-scan-note").hidden = !opts.note;
+  $("#rb-scan-note").textContent = opts.note || "";
+  // only a stated batch weight counts as "touched"; otherwise let the raw
+  // ingredient sum fill it in
+  if (draft && draft.total_g) $("#rb-total").dataset.touched = "1";
+  else { delete $("#rb-total").dataset.touched; syncBatchDefault(); }
   $("#rb-custom-name").value = "";
   $("#rb-custom-grams").value = "";
   ["#rb-m-kcal", "#rb-m-p", "#rb-m-c", "#rb-m-f"].forEach((sel) => ($(sel).value = ""));
@@ -1454,7 +1460,9 @@ function renderRecipeBuilder() {
   rbIngredients.forEach((ing, i) => {
     const row = document.createElement("div");
     row.className = "ingredient-row";
-    row.innerHTML = `<span class="ing-name">${esc(ing.name)}${ing.estimated ? ' <span class="chip est">est</span>' : ""}</span>
+    row.innerHTML = `<span class="ing-name">${esc(ing.name)}${ing.estimated ? ' <span class="chip est">est</span>' : ""}${
+      ing.as_written ? `<span class="ing-written">${esc(ing.as_written)}</span>` : ""
+    }</span>
       <input type="number" class="ing-g" min="0" value="${ing.grams}" inputmode="decimal" /><span class="ing-unit">g</span>
       <span class="ing-kcal">${Math.round(ing.kcal)} kcal</span>
       <button class="del">✕</button>`;
@@ -1526,7 +1534,65 @@ $("#rb-pick").addEventListener("click", () => {
   if (!foods.length) return alert("No saved foods yet — scan a label, or save an item from a meal.");
   openFoodPicker((food) => { rbPicked = food; renderRecipeBuilder(); $("#rb-grams").focus(); });
 });
-$("#new-recipe-btn").addEventListener("click", openRecipeBuilder);
+$("#new-recipe-btn").addEventListener("click", () => openRecipeBuilder());
+
+// ---------- recipe from a screenshot ----------
+// The screenshot gives ingredients and quantities; everything after that is the
+// normal builder, so the suggestion is editable in every way a typed recipe is.
+$("#recipe-input").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  ev.target.value = "";
+  if (!file) return;
+  const label = $("#scan-recipe-label");
+  const text = label.textContent;
+  label.textContent = "Reading the recipe…";
+  label.classList.add("busy");
+  try {
+    const { base64 } = await fileToResized(file, 1600);
+    const r = await LLM.analyzeRecipePhoto(base64);
+    const ings = [];
+    let linked = 0;
+    for (const i of r.ingredients || []) {
+      const grams = Math.round(i.grams);
+      if (!(grams > 0)) continue;
+      const k = grams / 100;
+      // Your own labelled food beats reference data for the same ingredient.
+      const food = findFoodMatch(i.name);
+      const per = food ? food.per_100g : i.per_100g;
+      if (food) linked++;
+      ings.push({
+        name: food ? foodTitle(food) : i.name,
+        food_id: food ? food.id : null,
+        grams, estimated: !food,
+        as_written: i.as_written || "",
+        kcal: r1(per.kcal * k), protein_g: r1(per.protein_g * k),
+        carbs_g: r1(per.carbs_g * k), fat_g: r1(per.fat_g * k),
+      });
+    }
+    if (!ings.length) {
+      alert("No recipe ingredients found in that image." + (r.notes ? "\n\n" + r.notes : ""));
+      return;
+    }
+    const finished = r.finished_g > 0 ? Math.round(r.finished_g) : null;
+    const portion = finished && r.servings > 0 ? Math.round(finished / r.servings) : null;
+    const parts = [`${ings.length} ingredient${ings.length === 1 ? "" : "s"} read`];
+    if (linked) parts.push(`${linked} matched to your saved foods (exact)`);
+    if (r.servings > 0) parts.push(`makes ${r.servings}`);
+    if (!finished) parts.push("batch weight is the raw sum — lower it for anything that cooks down");
+    const note = parts.join(" · ") + ". Check every weight before saving." + (r.notes ? " " + r.notes : "");
+
+    showView("settings");
+    openRecipeBuilder(
+      { name: r.name || "", ingredients: ings, total_g: finished, default_g: portion },
+      { scanned: true, note }
+    );
+    $("#recipe-builder").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) {
+    alert("Could not read that recipe: " + e.message);
+  }
+  label.textContent = text;
+  label.classList.remove("busy");
+});
 $("#rb-cancel").addEventListener("click", closeRecipeBuilder);
 // Reachable straight from Today — building a recipe is a cooking-time action,
 // not a settings chore.

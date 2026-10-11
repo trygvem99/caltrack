@@ -204,6 +204,57 @@ question: one further question ONLY if the correction itself is genuinely ambigu
     return call({ system: REVISE_SYSTEM, content: [{ type: "text", text }], schema: REVISE_SCHEMA, maxTokens: 2500 });
   }
 
+  // ---------- recipe from a screenshot or photo ----------
+  const RECIPE_INGREDIENT = {
+    type: "object", additionalProperties: false,
+    required: ["name", "grams", "as_written", "per_100g"],
+    properties: {
+      name: { type: "string" },
+      grams: NUM,
+      as_written: { type: "string" },
+      per_100g: {
+        type: "object", additionalProperties: false,
+        required: ["kcal", "protein_g", "carbs_g", "fat_g"],
+        properties: { kcal: NUM, protein_g: NUM, carbs_g: NUM, fat_g: NUM },
+      },
+    },
+  };
+  const RECIPE_SCHEMA = {
+    type: "object", additionalProperties: false,
+    required: ["name", "servings", "finished_g", "ingredients", "notes"],
+    properties: {
+      name: { type: "string" },
+      servings: NULL_NUM,
+      finished_g: NULL_NUM,
+      ingredients: { type: "array", items: RECIPE_INGREDIENT },
+      notes: { type: "string" },
+    },
+  };
+
+  const RECIPE_SYSTEM = `You are reading a recipe from a photo or screenshot — a website, a social post, a cookbook page, a handwritten card.
+
+- Extract ONLY the ingredients the recipe actually lists. Never add an ingredient that is not written down, however obvious it seems.
+- grams: convert each quantity to grams for the WHOLE batch as written. Use standard weights: 1 US cup flour 125 g, sugar 200 g, water/milk 240 g, butter 227 g; 1 tbsp 15 g (oil 14 g); 1 tsp 5 g; one medium egg 50 g without shell; one medium onion 150 g; one garlic clove 5 g. For anything already in grams, millilitres or ounces, convert directly (1 oz 28.35 g, 1 lb 454 g, 1 ml water-like liquid 1 g).
+- If a quantity is vague ("a handful", "to taste", "a splash"), use a sensible small amount and say so in that item's as_written.
+- as_written: the quantity exactly as the recipe states it ("2 cups flour", "a pinch of salt"), so the person can check your conversion.
+- per_100g: standard reference nutrition for that ingredient as sold, in the form the recipe uses (raw unless it says cooked). These should match any nutrition table.
+- servings: the number of servings or pieces the recipe says it makes, or null.
+- finished_g: the finished weight of the whole batch in grams IF the recipe states it (a tin size, a total weight, "makes 12 x 60 g buns"). Do NOT estimate cooking losses — return null when it is not stated.
+- notes: one or two short sentences on anything the person should check — unit assumptions you made, whether quantities were per serving rather than per batch, or text you could not read. Empty string if there is nothing.
+- If the image is not a recipe, return an empty ingredients array and explain in notes.`;
+
+  function analyzeRecipePhoto(base64, mediaType = "image/jpeg") {
+    return call({
+      system: RECIPE_SYSTEM,
+      content: [
+        { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+        { type: "text", text: "Extract this recipe." },
+      ],
+      schema: RECIPE_SCHEMA,
+      maxTokens: 3000,
+    });
+  }
+
   // ---------- single ingredient the user has never saved ----------
   const INGREDIENT_SCHEMA = {
     type: "object", additionalProperties: false,
@@ -235,5 +286,5 @@ question: one further question ONLY if the correction itself is genuinely ambigu
     });
   }
 
-  return { analyzePhoto, analyzeLabel, parseText, reviseItems, estimateIngredient, MODEL };
+  return { analyzePhoto, analyzeLabel, parseText, reviseItems, analyzeRecipePhoto, estimateIngredient, MODEL };
 })();

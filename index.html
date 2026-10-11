@@ -233,8 +233,13 @@
         </div>
         <p class="hint" id="foods-count"></p>
         <button class="linkish" id="new-recipe-btn">＋ New recipe from saved ingredients</button>
+        <!-- no capture attribute: screenshots live in the photo library, and
+             capture would force the camera open instead -->
+        <label class="linkish" for="recipe-input" id="scan-recipe-label">📷 Recipe from a screenshot</label>
+        <input type="file" id="recipe-input" accept="image/*" hidden />
         <div id="recipe-builder" hidden>
           <h3 id="rb-heading">New recipe</h3>
+          <p class="hint scan-note" id="rb-scan-note" hidden></p>
           <label>Recipe name<input type="text" id="rb-name" placeholder="e.g. Pancake batter" /></label>
           <div id="rb-ingredients"></div>
           <p class="hint tiny-label">From your saved foods — exact</p>
