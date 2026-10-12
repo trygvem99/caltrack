@@ -312,3 +312,7 @@ body { touch-action: pan-x pan-y; }
 #scan-recipe-label.busy { color: var(--dim); pointer-events: none; }
 .hint.scan-note { border-left: 2px solid var(--accent); padding-left: 9px; margin: 6px 0 12px; }
 .ing-written { font-size: 11px; color: var(--dim); display: block; }
+
+#boot.failed .spinner { display: none; }
+#boot.failed { border: 1px solid var(--warn); }
+#boot-retry { margin-top: 12px; }

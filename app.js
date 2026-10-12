@@ -1973,6 +1973,26 @@ function renderSeriesList() {
 
 $("#load-warning").addEventListener("click", () => location.reload());
 
+// The boot card stays up until data is actually in hand. A phone waking its
+// database can take several seconds; that should read as loading, never as an
+// app that opened empty.
+function bootProgress() {
+  clearTimeout(bootProgress.t1);
+  clearTimeout(bootProgress.t2);
+  bootProgress.t1 = setTimeout(() => ($("#boot-text").textContent = "Still loading — the first open in a while can be slow."), 2500);
+  bootProgress.t2 = setTimeout(() => ($("#boot-text").textContent = "Waking the database. Nothing is lost; this can take a moment."), 8000);
+}
+function bootFailed(e) {
+  clearTimeout(bootProgress.t1);
+  clearTimeout(bootProgress.t2);
+  $("#boot").hidden = false;
+  $("#boot").classList.add("failed");
+  $("#boot-text").innerHTML =
+    `<b>Could not load your data.</b><br />${esc(e.message)}.<br />Nothing has been deleted.` +
+    `<br /><button class="btn small" id="boot-retry">Try again</button>`;
+  $("#boot-retry").addEventListener("click", () => location.reload());
+}
+
 // ---------- zoom lock ----------
 // iOS ignores user-scalable=no, so pinch and double-tap are cancelled here.
 // Inputs are 16px in the stylesheet, which is what stops focus-zoom.
@@ -2114,10 +2134,10 @@ const readCounts = () => { try { return JSON.parse(localStorage.getItem(COUNTS_K
 const writeCounts = () => localStorage.setItem(COUNTS_KEY, JSON.stringify({ log: log.length, foods: foods.length, weights: weights.length }));
 
 async function loadOnce() {
-  [log, foods, weights, series, corrections] = await DB.withTimeout(Promise.all([
+  [log, foods, weights, series, corrections] = await Promise.all([
     Data.log.all(), Data.foods.all(), Data.weights.all(), Data.series.all(), Data.corrections.all(),
-  ]), 4000, "Loading your data");
-  profile = await DB.withTimeout(Data.getProfile(), 4000, "Loading your profile");
+  ]);
+  profile = await Data.getProfile();
 }
 
 // On a cold start WebKit sometimes returns empty stores from a database that is
@@ -2129,17 +2149,16 @@ async function reloadCaches({ retry = false } = {}) {
   const short = () => log.length < (want.log || 0) || foods.length < (want.foods || 0);
   let failed = null;
   for (let i = 0; i < 4; i++) {
+    failed = null;
     try {
       await loadOnce();
-      failed = null;
-      if (!short()) break;
     } catch (e) {
-      failed = e; // aborted or timed out — retrying is the whole point
+      failed = e; // a genuine error or abort: the connection is worth discarding
     }
-    if (i < 3) {
-      DB.close();
-      await new Promise((r) => setTimeout(r, 150 * (i + 1)));
-    }
+    if (!failed && !short()) break;
+    if (i === 3) break;
+    if (failed) DB.close();
+    await new Promise((r) => setTimeout(r, 200 * (i + 1)));
   }
   if (failed) throw failed;
   $("#load-warning").hidden = !short();
@@ -2153,8 +2172,12 @@ async function reloadCaches({ retry = false } = {}) {
 
 (async function init() {
   try {
+    bootProgress();
     await Data.init();
-    await reloadCaches({ retry: true });
+    // One generous backstop against a true hang — never a deadline the load
+    // has to beat. Patience here costs a slower start; impatience cost the
+    // whole day's data looking gone.
+    await DB.withTimeout(reloadCaches({ retry: true }), 25000, "Loading your data");
     if (!profile) {
       profile = {
         kcal_targets: DEFAULT_TARGETS.slice(), protein_target: 160,
@@ -2167,14 +2190,12 @@ async function reloadCaches({ retry = false } = {}) {
       profile.maintenance = Array(7).fill(profile.tdee || null);
       await Data.saveProfile(profile);
     }
+    $("#boot").hidden = true;
   } catch (e) {
     console.error(e);
-    const w = $("#load-warning");
-    w.hidden = false;
-    w.textContent = `${e.message}. Your data has not been deleted — tap to try again.`;
+    bootFailed(e);
   }
   logDate = todayStr();
-  $("#boot").hidden = true;
   const hasKey = !!localStorage.getItem("caltrack_api_key");
   showView(hasKey ? "today" : "settings");
   DB.onWrite(() => { writeCounts(); Cloud.schedule(); });

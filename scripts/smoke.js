@@ -105,7 +105,30 @@
     foods = saved;
   }
 
-  // 6. A failure must be visible, never a silent return to the same screen.
+  // 6. A SLOW database must still load. Reads were once given 4s each and the
+  //    connection closed on every miss, so a phone waking its database ended
+  //    up with an empty app that only a manual refresh fixed.
+  async function slowLoadStillLoads() {
+    const realAll = Data.log.all;
+    const wantFoods = foods.length;
+    let closed = 0;
+    const realClose = DB.close;
+    DB.close = () => { closed++; realClose(); };
+    Data.log.all = async () => { await wait(5000); return realAll(); };
+    try {
+      const started = Date.now();
+      await reloadCaches({ retry: true });
+      check(foods.length === wantFoods, `slow load lost data: ${foods.length} of ${wantFoods} foods`);
+      check(closed === 0, "slow load closed the database connection; only a failed read should");
+      check(Date.now() - started < 12000, "slow load retried instead of waiting");
+    } finally {
+      Data.log.all = realAll;
+      DB.close = realClose;
+      await reloadCaches();
+    }
+  }
+
+  // 7. A failure must be visible, never a silent return to the same screen.
   function errorsAreVisible() {
     const t = document.querySelector("#toast");
     check(!!t && typeof showError === "function", "no error surface");
@@ -147,13 +170,14 @@
 
     if (typeof profile !== "undefined" && profile) await maintenanceRoundTrip();
     stableOrder();
+    await slowLoadStillLoads();
     errorsAreVisible();
 
     // return a copy: `fail` is reused and cleared by the next run, which would
     // otherwise empty the failure list a caller is still holding
     return fail.length
       ? { ok: false, failures: fail.slice() }
-      : { ok: true, checks: "hidden/reachable/overflow across today, history, settings, review; maintenance round-trip; stable ordering; error surface" };
+      : { ok: true, checks: "hidden/reachable/overflow across today, history, settings, review; maintenance round-trip; stable ordering; slow-load tolerance; error surface" };
   }
 
   global.CalSmoke = { run };
