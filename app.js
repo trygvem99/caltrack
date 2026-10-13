@@ -3,6 +3,30 @@
 "use strict";
 
 const $ = (sel) => document.querySelector(sel);
+
+// Startup trace. Two fixes for "I have to refresh before it starts" missed,
+// because the slow part cannot be seen from here. This records where the time
+// actually went, survives the reload, and is readable in Settings.
+const bootMarks = [];
+const mark = (label) => bootMarks.push(`${label} ${Math.round(performance.now())}ms`);
+mark("script");
+function saveBootTrace(outcome) {
+  try {
+    const nav = performance.getEntriesByType("navigation")[0] || {};
+    const line = {
+      at: new Date().toISOString(),
+      outcome,
+      // time to the first byte of the HTML: large here means the page was
+      // waiting on the network/service worker before any of this code ran
+      html_ms: Math.round(nav.responseEnd || 0),
+      from: nav.deliveryType || (navigator.serviceWorker && navigator.serviceWorker.controller ? "sw" : "network"),
+      marks: bootMarks.slice(),
+    };
+    const all = JSON.parse(localStorage.getItem("caltrack_boot_trace") || "[]");
+    all.unshift(line);
+    localStorage.setItem("caltrack_boot_trace", JSON.stringify(all.slice(0, 8)));
+  } catch { /* diagnostics must never break startup */ }
+}
 const { rollingMean7, linearFitSlope, tdeeSuggestion, recipePer100g, daysBetween, round1: r1, zoneBarPct, zoneKey } = CalMath;
 
 let profile = null;
@@ -1340,6 +1364,7 @@ function renderSettings() {
   renderFoodsList();
   renderSeriesList();
   renderCloudStatus();
+  renderBootTrace();
 
   const last = Number(localStorage.getItem("caltrack_last_backup") || 0);
   $("#last-backup-line").textContent = last ? `Last backup: ${new Date(last).toLocaleDateString()}` : "No backup yet — data lives only on this phone.";
@@ -1982,6 +2007,15 @@ function bootProgress() {
   bootProgress.t1 = setTimeout(() => ($("#boot-text").textContent = "Still loading — the first open in a while can be slow."), 2500);
   bootProgress.t2 = setTimeout(() => ($("#boot-text").textContent = "Waking the database. Nothing is lost; this can take a moment."), 8000);
 }
+// The cache is served first now, so a deploy arrives on the next launch. This
+// makes that visible immediately rather than leaving the phone a version behind.
+function showUpdateReady() {
+  const bar = $("#update-bar");
+  if (!bar.hidden) return;
+  bar.hidden = false;
+  $("#update-reload").addEventListener("click", () => location.reload(), { once: true });
+}
+
 function bootFailed(e) {
   clearTimeout(bootProgress.t1);
   clearTimeout(bootProgress.t2);
@@ -2094,6 +2128,30 @@ Restore it now?`)) return false;
   return true;
 }
 
+// ---------- startup trace ----------
+function renderBootTrace() {
+  let all = [];
+  try { all = JSON.parse(localStorage.getItem("caltrack_boot_trace") || "[]"); } catch { /* ignore */ }
+  const el = $("#boot-trace");
+  if (!all.length) { el.textContent = "No starts recorded yet."; return; }
+  el.innerHTML = all
+    .map((l) => {
+      const when = new Date(l.at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+      return `<div class="bt-row"><b>${esc(when)}</b> · page ${l.html_ms}ms (${esc(l.from || "?")}) · ${esc(l.outcome)}<br /><span class="hint">${esc((l.marks || []).join(" → "))}</span></div>`;
+    })
+    .join("");
+}
+$("#boot-trace-copy").addEventListener("click", async () => {
+  const text = localStorage.getItem("caltrack_boot_trace") || "[]";
+  try {
+    await navigator.clipboard.writeText(text);
+    $("#boot-trace-copy").textContent = "copied ✓";
+    setTimeout(() => ($("#boot-trace-copy").textContent = "copy"), 1500);
+  } catch {
+    prompt("Copy this and send it over:", text);
+  }
+});
+
 // ---------- backup / restore ----------
 $("#backup-btn").addEventListener("click", async () => {
   await Data.exportBackup();
@@ -2174,10 +2232,12 @@ async function reloadCaches({ retry = false } = {}) {
   try {
     bootProgress();
     await Data.init();
+    mark("db-open");
     // One generous backstop against a true hang — never a deadline the load
     // has to beat. Patience here costs a slower start; impatience cost the
     // whole day's data looking gone.
     await DB.withTimeout(reloadCaches({ retry: true }), 25000, "Loading your data");
+    mark(`loaded(${log.length}m/${foods.length}f)`);
     if (!profile) {
       profile = {
         kcal_targets: DEFAULT_TARGETS.slice(), protein_target: 160,
@@ -2191,17 +2251,25 @@ async function reloadCaches({ retry = false } = {}) {
       await Data.saveProfile(profile);
     }
     $("#boot").hidden = true;
+    saveBootTrace("ok");
   } catch (e) {
     console.error(e);
     bootFailed(e);
+    saveBootTrace("failed: " + e.message);
   }
   logDate = todayStr();
   const hasKey = !!localStorage.getItem("caltrack_api_key");
   showView(hasKey ? "today" : "settings");
+  mark("rendered");
   DB.onWrite(() => { writeCounts(); Cloud.schedule(); });
   try { await maybeRestoreFromCloud(); } catch (e) { console.warn("cloud check failed:", e); }
   Cloud.schedule();
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+    navigator.serviceWorker.addEventListener("message", (e) => {
+      if (e.data && e.data.type === "update-ready") showUpdateReady();
+    });
+  }
 })();
 
 // Explains what cut mode is currently doing, including the case where it is on
@@ -2223,3 +2291,4 @@ $("#go-set-maint").addEventListener("click", () => {
   showView("settings");
   $("#maintenance-grid").scrollIntoView({ behavior: "smooth", block: "center" });
 });
+

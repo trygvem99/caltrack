@@ -316,3 +316,13 @@ body { touch-action: pan-x pan-y; }
 #boot.failed .spinner { display: none; }
 #boot.failed { border: 1px solid var(--warn); }
 #boot-retry { margin-top: 12px; }
+
+.update-bar {
+  position: fixed; left: 12px; right: 12px; bottom: 84px; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--card); border: 1px solid var(--accent); border-radius: 10px;
+  padding: 10px 12px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.4);
+}
+.bt-row { padding: 6px 0; border-bottom: 1px solid var(--line); word-break: break-word; }
+.bt-row:last-child { border-bottom: none; }
+details > summary { cursor: pointer; font-size: 15px; color: var(--dim); font-weight: 600; }

@@ -32,6 +32,9 @@ http
       const headers = {
         "Content-Type": TYPES[path.extname(file)] || "application/octet-stream",
         "Cache-Control": "no-cache",
+        // GitHub Pages sends an ETag, and the service worker uses it to notice a
+        // deploy. Send one here too so that path is testable locally.
+        ETag: '"' + data.length + "-" + require("crypto").createHash("sha1").update(data).digest("hex").slice(0, 12) + '"',
       };
       // ?download=1 forces save-as instead of rendering inline (phone transfers)
       if (url.searchParams.get("download") === "1") {

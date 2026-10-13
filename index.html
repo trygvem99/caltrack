@@ -93,6 +93,10 @@
 
     <!-- SCAN / REVIEW -->
     <div id="toast" class="toast" hidden></div>
+    <div id="update-bar" class="update-bar" hidden>
+      <span>A new version is ready.</span>
+      <button class="btn small" id="update-reload">Reload</button>
+    </div>
     <section id="view-scan" class="view" hidden>
       <img id="scan-preview" alt="" />
       <div id="scan-status" class="card center" hidden>
@@ -292,6 +296,13 @@
         <h2>Weight series</h2>
         <div id="series-list"></div>
       </div>
+
+      <details class="card">
+        <summary>Startup trace</summary>
+        <p class="hint">What the last few app starts actually did. If the app is slow to start, send this over. <b>page</b> is how long the phone took to hand over the page before any app code ran.</p>
+        <div id="boot-trace" class="hint"></div>
+        <button class="linkish tiny" id="boot-trace-copy">copy</button>
+      </details>
 
       <div class="card">
         <h2>Cloud backup</h2>
