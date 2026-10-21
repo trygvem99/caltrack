@@ -2292,6 +2292,14 @@ async function reloadCaches({ retry = false } = {}) {
       // One generous backstop against a true hang — never a deadline the load
       // has to beat.
       await DB.withTimeout(reloadCaches({ retry: true }), 25000, "Loading your data");
+      // Not one meal, after retries, on a phone that held hundreds: the data
+      // is not in this database. This also catches a wipe whose first launch
+      // was missed — the database then already exists, so it is not "new".
+      if (log.length === 0 && readCounts().log > 0) {
+        wipePending = true;
+        Cloud.hold("no meals in the database, but this phone held some");
+        $("#load-warning").hidden = true;
+      }
     }
     mark(`loaded(${log.length}m/${foods.length}f)`);
     if (!profile) {
