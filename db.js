@@ -82,6 +82,7 @@ const Data = (() => {
   const STORES = ["log", "foods", "weights", "series", "corrections", "profile"];
   const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
+  // Returns true when the database was created on this launch.
   async function init() {
     await DB.open();
     if ("storage" in navigator && navigator.storage.persist) {
@@ -99,7 +100,9 @@ const Data = (() => {
         console.warn("Seed import skipped:", e);
       }
       await DB.put("profile", { key: "seeded", at: new Date().toISOString() });
+      return true;
     }
+    return false;
   }
 
   // ---- profile (single record under key "profile") ----
@@ -150,6 +153,11 @@ const Data = (() => {
     for (const s of STORES) {
       await DB.clear(s);
       if (Array.isArray(json.stores[s])) await DB.bulkPut(s, json.stores[s]);
+    }
+    // A restored database is not a new one. Without the marker the next launch
+    // re-added the starter foods on top and reported a second wipe.
+    if (!(await DB.get("profile", "seeded"))) {
+      await DB.put("profile", { key: "seeded", at: new Date().toISOString() });
     }
   }
 

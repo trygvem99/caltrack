@@ -10,7 +10,7 @@
 // Serving the cache first makes startup independent of the network. The fetch
 // still runs, refreshes the cache, and tells the page when a deploy has landed,
 // which is what network-first was protecting (a deploy must never be invisible).
-const CACHE = "caltrack-v11";
+const CACHE = "caltrack-v12";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./math.js", "./db.js", "./cloud.js", "./llm.js", "./manifest.webmanifest", "./icon.svg", "./seed/foods.json"];
 const NET_TIMEOUT = 8000;
 

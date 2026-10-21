@@ -2051,8 +2051,10 @@ function renderCloudStatus() {
   if (!st.enabled) { el.textContent = "Off — connect a repository above."; return; }
   const c = st.cloud;
   const cloudTxt = c && c.exported_at ? `cloud copy ${new Date(c.exported_at).toLocaleString()} · ${c.log} meals, ${c.foods} foods` : c ? "no backup in the cloud yet" : "not checked yet";
-  if (st.blocked) {
-    el.textContent = `PAUSED: the cloud has ${c.log} meals but this phone has ${log.length}. Automatic upload is held so the cloud copy is not overwritten — use “Restore from cloud”, or “Back up now” to overwrite it on purpose.`;
+  if (st.held) {
+    el.textContent = "PAUSED: this phone's database started empty on this launch, so it is not allowed to replace your backup. Tap “Restore from cloud” to get your data back.";
+  } else if (st.blocked) {
+    el.textContent = `PAUSED: your backup holds ${Math.max(c ? c.log : 0, st.highWater || 0)} meals but this phone has ${log.length}, so it is not being overwritten. If data is missing here, tap “Restore from cloud”.`;
   } else if (st.isPublic) {
     el.textContent = `STOPPED: ${st.repo} is public. Uploads are refused. Disconnect and reconnect with a private repository.`;
   } else if (st.lastError) {
@@ -2073,8 +2075,11 @@ $("#save-gh-btn").addEventListener("click", async () => {
   try {
     await Cloud.setup(tok, rep);
     $("#f-gh-token").value = "";
-    Cloud.schedule();
-    await maybeRestoreFromCloud();
+    // a phone with nothing on it, connecting to a backup that has something,
+    // wants the backup back — not to replace it
+    const c = Cloud.status().cloud;
+    if (!log.length && c && c.log > 0) await restoreFromCloud();
+    else Cloud.schedule();
   } catch (e) {
     alert("Could not connect: " + e.message + "\n\nCheck that the repository exists and the token has Contents read/write on it.");
   }
@@ -2083,50 +2088,84 @@ $("#save-gh-btn").addEventListener("click", async () => {
 });
 $("#cloud-upload-btn").addEventListener("click", async () => {
   const st = Cloud.status();
-  const force = st.blocked && confirm(`Overwrite the cloud copy (${st.cloud.log} meals) with this phone's ${log.length} meals?`);
-  if (st.blocked && !force) return;
+  // This button was one confirm away from replacing a full backup with an empty
+  // phone, and the paused message pointed straight at it. That is how a wiped
+  // phone overwrote the backup. Overwriting a larger backup now takes intent.
+  if (st.held) {
+    return alert("Backup is paused: this phone's database started empty on this launch, so it must not replace your backup. Use “Restore from cloud” to get your data back.");
+  }
+  let force = false;
+  if (st.blocked) {
+    const best = Math.max((st.cloud && st.cloud.log) || 0, st.highWater || 0);
+    const typed = prompt(`Your backup holds ${best} meals. This phone has ${log.length}.\n\nUploading now would REPLACE the backup with this phone's data. If your data is missing, tap Cancel and use “Restore from cloud” instead.\n\nType OVERWRITE to replace the backup anyway.`);
+    if ((typed || "").trim().toUpperCase() !== "OVERWRITE") return;
+    force = true;
+  }
   try { await Cloud.upload(await Data.snapshot(), { force }); }
   catch (e) { alert("Upload failed: " + e.message); }
   renderCloudStatus();
 });
-$("#cloud-restore-btn").addEventListener("click", async () => {
+async function restoreFromCloud({ ask = true } = {}) {
   try {
-    const snap = await Cloud.download();
-    if (!snap) return alert("There is no backup in the cloud yet.");
-    const c = Cloud.status().cloud;
-    if (!confirm(`Replace everything on this phone with the cloud copy from ${new Date(c.exported_at).toLocaleString()} (${c.log} meals, ${c.foods} foods)?
-
-A copy of what is on this phone now will be saved first.`)) return;
-    if (log.length) await Data.exportBackup();
-    await Data.restoreBackup(snap);
+    const best = await Cloud.bestSnapshot();
+    if (!best) return alert("There is no backup in the cloud yet.");
+    const st = best.snap.stores;
+    const when = new Date(best.snap.exported_at).toLocaleString();
+    const keepCopy = log.length > 0 && !wipePending;
+    const msg = `Restore your backup from ${when}?\n\n${st.log.length} meals · ${st.foods.length} foods · ${st.weights.length} weigh-ins` +
+      (best.fromHistory ? "\n\nThe newest backup copy was incomplete, so this uses the last complete one." : "") +
+      (keepCopy ? "\n\nA copy of what is on this phone now will be saved first." : "");
+    if (ask && !confirm(msg)) return;
+    if (keepCopy) await Data.exportBackup();
+    await Data.restoreBackup(best.snap);
     location.reload();
   } catch (e) {
     alert("Restore failed: " + e.message);
   }
-});
+}
+$("#cloud-restore-btn").addEventListener("click", () => restoreFromCloud());
 $("#cloud-forget-btn").addEventListener("click", () => {
   if (!confirm("Disconnect cloud backup? The copy on GitHub is kept; only this phone stops uploading.")) return;
   Cloud.forget();
   renderCloudStatus();
 });
 
-// The case this whole module exists for: the phone's storage was evicted, the
-// app came up empty, and the cloud still has everything.
-async function maybeRestoreFromCloud() {
-  if (!Cloud.enabled()) return false;
-  const snap = await Cloud.download();
-  const c = Cloud.status().cloud;
-  if (!snap || !c.log || log.length > 0) return false;
-  // An empty read that contradicts the count record is a failed read, not a
-  // wiped phone; restoring over it could bury data that is still there.
-  if (readCounts().log > 0) return false;
-  if (!confirm(`The cloud backup from ${new Date(c.exported_at).toLocaleString()} has ${c.log} meals and ${c.foods} foods; this phone has none.
-
-Restore it now?`)) return false;
-  await Data.restoreBackup(snap);
-  location.reload();
-  return true;
+// The case this whole module exists for. A database created on this launch,
+// on a phone that has used the app before, means the phone lost its data —
+// not that a read failed. Either the count record or the cloud connection
+// itself (the token lives in localStorage) proves prior use.
+let wipePending = false;
+function wipeDetected(fresh) {
+  return fresh && (readCounts().log > 0 || Cloud.enabled());
 }
+async function offerWipeRestore() {
+  const b = $("#wipe-banner");
+  b.hidden = false;
+  $("#wipe-text").textContent = "This phone's storage was cleared, so the app started with an empty database. Checking your backup…";
+  $("#wipe-restore").hidden = true;
+  if (!Cloud.enabled()) {
+    $("#wipe-text").textContent = "This phone's storage was cleared, so the app started with an empty database. Cloud backup is not connected here — restore from a backup file under Settings → Backup file.";
+    return;
+  }
+  let best = null;
+  try { best = await Cloud.bestSnapshot(); } catch (e) {
+    $("#wipe-text").textContent = `This phone's storage was cleared. Could not reach your backup (${e.message}). Uploads stay paused so the backup is safe — reopen the app when you have signal.`;
+    return;
+  }
+  const st = best && best.snap.stores;
+  if (!st || !st.log.length) {
+    // nothing to protect: this really is a new start
+    wipePending = false;
+    Cloud.hold(null);
+    b.hidden = true;
+    return;
+  }
+  const when = new Date(best.snap.exported_at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  $("#wipe-text").textContent =
+    `This phone's storage was cleared, so the app started with an empty database. Your backup from ${when} has ${st.log.length} meals, ${st.foods.length} foods and ${st.weights.length} weigh-ins. Backup uploads are paused until you restore.`;
+  $("#wipe-restore").hidden = false;
+}
+$("#wipe-restore").addEventListener("click", () => restoreFromCloud({ ask: false }));
 
 // ---------- startup trace ----------
 function renderBootTrace() {
@@ -2189,7 +2228,12 @@ $("#restore-input").addEventListener("change", async (ev) => {
 // IndexedDB that comes up empty can be recognised as wrong rather than trusted.
 const COUNTS_KEY = "caltrack_counts";
 const readCounts = () => { try { return JSON.parse(localStorage.getItem(COUNTS_KEY)) || {}; } catch { return {}; } };
-const writeCounts = () => localStorage.setItem(COUNTS_KEY, JSON.stringify({ log: log.length, foods: foods.length, weights: weights.length }));
+// Frozen while a wipe is pending: the first write after a wipe used to replace
+// "212 meals" with 0 and erase the only evidence the phone had lost anything.
+const writeCounts = () => {
+  if (wipePending) return;
+  localStorage.setItem(COUNTS_KEY, JSON.stringify({ log: log.length, foods: foods.length, weights: weights.length }));
+};
 
 async function loadOnce() {
   [log, foods, weights, series, corrections] = await Promise.all([
@@ -2231,12 +2275,24 @@ async function reloadCaches({ retry = false } = {}) {
 (async function init() {
   try {
     bootProgress();
-    await Data.init();
-    mark("db-open");
-    // One generous backstop against a true hang — never a deadline the load
-    // has to beat. Patience here costs a slower start; impatience cost the
-    // whole day's data looking gone.
-    await DB.withTimeout(reloadCaches({ retry: true }), 25000, "Loading your data");
+    const fresh = await Data.init();
+    mark(fresh ? "db-open(NEW database)" : "db-open");
+    try {
+      const p = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : "n/a";
+      const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : {};
+      mark(`persisted=${p} used=${Math.round((est.usage || 0) / 1e6)}/${Math.round((est.quota || 0) / 1e6)}MB`);
+    } catch { /* diagnostics only */ }
+    if (wipeDetected(fresh)) {
+      // Nothing to retry for: the data is not in this database at all. Hold
+      // uploads before anything can schedule one.
+      wipePending = true;
+      Cloud.hold("database created empty on this launch");
+      await loadOnce();
+    } else {
+      // One generous backstop against a true hang — never a deadline the load
+      // has to beat.
+      await DB.withTimeout(reloadCaches({ retry: true }), 25000, "Loading your data");
+    }
     mark(`loaded(${log.length}m/${foods.length}f)`);
     if (!profile) {
       profile = {
@@ -2259,11 +2315,17 @@ async function reloadCaches({ retry = false } = {}) {
   }
   logDate = todayStr();
   const hasKey = !!localStorage.getItem("caltrack_api_key");
-  showView(hasKey ? "today" : "settings");
+  // the restore banner lives on Today; a wiped phone must land on it
+  showView(hasKey || wipePending ? "today" : "settings");
   mark("rendered");
   DB.onWrite(() => { writeCounts(); Cloud.schedule(); });
-  try { await maybeRestoreFromCloud(); } catch (e) { console.warn("cloud check failed:", e); }
-  Cloud.schedule();
+  if (wipePending) {
+    offerWipeRestore();
+  } else {
+    // prime the guard with what the backup holds before anything can upload
+    try { if (Cloud.enabled()) await Cloud.download(); } catch (e) { console.warn("cloud check failed:", e); }
+    Cloud.schedule();
+  }
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});
     navigator.serviceWorker.addEventListener("message", (e) => {

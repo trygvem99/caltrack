@@ -15,6 +15,14 @@ const Cloud = (() => {
 
   let timer = null, busy = false, dirty = false, blocked = false, lastError = null;
   let isPublic = false; // a public repo must never receive this file
+  let held = null; // reason uploads are refused outright this session, or null
+
+  // The most meals the cloud copy is known to have held. The guard used to
+  // compare against the CURRENT cloud copy, so the first bad upload disabled it
+  // for every upload after. This remembers the good copy across that.
+  const HW_KEY = "caltrack_cloud_hw";
+  const highWater = () => Number(localStorage.getItem(HW_KEY) || 0);
+  const noteCount = (n) => { if (n > highWater()) localStorage.setItem(HW_KEY, String(n)); };
   let cloud = null; // what is on GitHub, once looked at: {log, foods, exported_at, sha}
   const listeners = [];
   const notify = () => listeners.forEach((f) => f());
@@ -72,11 +80,36 @@ const Cloud = (() => {
     // the JSON form inlines content only up to 1 MB; the raw form has no such limit
     const snap = JSON.parse(await gh(`/repos/${repo()}/contents/${PATH}`, { raw: true }));
     cloud = { ...counts(snap), sha: meta.sha };
+    noteCount(cloud.log);
     return snap;
+  }
+
+  // The best recent version of the backup. The newest copy can be a bad one —
+  // a wiped phone uploaded an empty database over a full backup twice — but
+  // every version is kept in git, so restore picks the newest copy that holds
+  // (nearly) as many meals as any recent version did.
+  async function bestSnapshot() {
+    const head = await download();
+    const commits = await gh(`/repos/${repo()}/commits?path=${PATH}&per_page=15`);
+    const versions = await Promise.all(commits.map(async (c) => {
+      try {
+        const snap = JSON.parse(await gh(`/repos/${repo()}/contents/${PATH}?ref=${c.sha}`, { raw: true }));
+        return { sha: c.sha, snap, log: counts(snap).log };
+      } catch { return null; }
+    }));
+    const ok = versions.filter(Boolean);
+    const max = Math.max(head ? counts(head).log : 0, ...ok.map((v) => v.log), 0);
+    if (!max) return head ? { snap: head, fromHistory: false } : null;
+    if (head && counts(head).log >= max * 0.9) return { snap: head, fromHistory: false };
+    const best = ok.find((v) => v.log >= max * 0.9); // newest first
+    return best ? { snap: best.snap, fromHistory: true } : null;
   }
 
   async function upload(snap, { force = false } = {}) {
     if (!enabled()) return;
+    // A database created this launch must never become the backup, forced or
+    // not: it is empty because the phone lost its data, not because you did.
+    if (held) { blocked = true; notify(); return; }
     if (busy) { dirty = true; return; }
     busy = true; notify();
     try {
@@ -84,13 +117,15 @@ const Cloud = (() => {
       for (let attempt = 0; attempt < 2; attempt++) {
         if (!cloud) await download();
         const local = counts(snap);
-        if (!force && cloud.log > 0 && local.log < cloud.log / 2) { blocked = true; return; }
+        const best = Math.max(cloud.log, highWater());
+        if (!force && best > 0 && local.log < best / 2) { blocked = true; return; }
         blocked = false;
         const body = { message: `backup ${local.exported_at}`, content: b64(JSON.stringify(snap)) };
         if (cloud.sha) body.sha = cloud.sha;
         try {
           const r = await gh(`/repos/${repo()}/contents/${PATH}`, { method: "PUT", body: JSON.stringify(body) });
           cloud = { ...local, sha: r.content.sha };
+          noteCount(local.log);
           localStorage.setItem("caltrack_last_backup", String(Date.now()));
           lastError = null;
           return;
@@ -140,9 +175,10 @@ const Cloud = (() => {
     notify();
   }
   const status = () => ({
-    enabled: enabled(), repo: repo(), busy, blocked, lastError, cloud, isPublic,
+    enabled: enabled(), repo: repo(), busy, blocked, lastError, cloud, isPublic, held, highWater: highWater(),
     lastAt: Number(localStorage.getItem("caltrack_last_backup") || 0),
   });
 
-  return { enabled, download, upload, schedule, flush, setup, forget, status, onChange: (f) => listeners.push(f) };
+  const hold = (reason) => { held = reason; clearTimeout(timer); timer = null; notify(); };
+  return { enabled, download, bestSnapshot, upload, schedule, flush, setup, forget, hold, status, onChange: (f) => listeners.push(f) };
 })();

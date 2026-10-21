@@ -128,7 +128,30 @@
     }
   }
 
-  // 7. A failure must be visible, never a silent return to the same screen.
+  // 7. A database created on this launch, on a phone that has used the app
+  //    before, is a wipe — not a read to retry. Treating it as a misread once
+  //    told the user "nothing has been deleted", looped on reload, and let the
+  //    empty phone overwrite the backup.
+  function wipeIsRecognised() {
+    const saved = localStorage.getItem("caltrack_counts");
+    try {
+      localStorage.setItem("caltrack_counts", JSON.stringify({ log: 212, foods: 67 }));
+      check(wipeDetected(true) === true, "fresh database + prior data not treated as a wipe");
+      check(wipeDetected(false) === false, "an existing database treated as a wipe");
+      localStorage.removeItem("caltrack_counts");
+      check(wipeDetected(true) === Cloud.enabled(), "a genuinely first launch treated as a wipe");
+    } finally {
+      if (saved === null) localStorage.removeItem("caltrack_counts");
+      else localStorage.setItem("caltrack_counts", saved);
+    }
+    // a held session must refuse to upload anything, forced or not
+    Cloud.hold("smoke");
+    check(!!Cloud.status().held, "hold did not take");
+    Cloud.hold(null);
+    check(!Cloud.status().held, "hold did not release");
+  }
+
+  // 8. A failure must be visible, never a silent return to the same screen.
   function errorsAreVisible() {
     const t = document.querySelector("#toast");
     check(!!t && typeof showError === "function", "no error surface");
@@ -171,13 +194,14 @@
     if (typeof profile !== "undefined" && profile) await maintenanceRoundTrip();
     stableOrder();
     await slowLoadStillLoads();
+    wipeIsRecognised();
     errorsAreVisible();
 
     // return a copy: `fail` is reused and cleared by the next run, which would
     // otherwise empty the failure list a caller is still holding
     return fail.length
       ? { ok: false, failures: fail.slice() }
-      : { ok: true, checks: "hidden/reachable/overflow across today, history, settings, review; maintenance round-trip; stable ordering; slow-load tolerance; error surface" };
+      : { ok: true, checks: "hidden/reachable/overflow across today, history, settings, review; maintenance round-trip; stable ordering; slow-load tolerance; wipe recognition; error surface" };
   }
 
   global.CalSmoke = { run };
