@@ -151,7 +151,27 @@
     check(!Cloud.status().held, "hold did not release");
   }
 
-  // 8. A failure must be visible, never a silent return to the same screen.
+  // 8. Adding a food to a meal must be able to reach past the saved foods;
+  //    the other pickers (linking, recipes) must not grow a lookup row.
+  function addSearchReachesPastSaved() {
+    const search = document.querySelector("#fp-search");
+    openFoodPicker(() => {}, { lookup: () => {}, manual: () => {} });
+    search.value = "zzz-not-a-saved-food";
+    renderFoodPicker();
+    const extras = [...document.querySelectorAll("#fp-list .fp-extra")].map((r) => r.textContent);
+    check(extras.some((t) => t.includes("Look up")), "add-item search offers no lookup for an unsaved food");
+    check(extras.some((t) => t.includes("Type values myself")), "add-item search lost the type-it-yourself option");
+    check(!document.querySelector("#fp-lookup-opts").hidden, "save-lookup option not shown");
+    closeFoodPicker();
+    openFoodPicker(() => {});
+    search.value = "zzz-not-a-saved-food";
+    renderFoodPicker();
+    check(!document.querySelector("#fp-list .fp-extra"), "a plain picker grew a lookup row");
+    check(document.querySelector("#fp-lookup-opts").hidden, "a plain picker shows the save-lookup option");
+    closeFoodPicker();
+  }
+
+  // 9. A failure must be visible, never a silent return to the same screen.
   function errorsAreVisible() {
     const t = document.querySelector("#toast");
     check(!!t && typeof showError === "function", "no error surface");
@@ -195,13 +215,14 @@
     stableOrder();
     await slowLoadStillLoads();
     wipeIsRecognised();
+    addSearchReachesPastSaved();
     errorsAreVisible();
 
     // return a copy: `fail` is reused and cleared by the next run, which would
     // otherwise empty the failure list a caller is still holding
     return fail.length
       ? { ok: false, failures: fail.slice() }
-      : { ok: true, checks: "hidden/reachable/overflow across today, history, settings, review; maintenance round-trip; stable ordering; slow-load tolerance; wipe recognition; error surface" };
+      : { ok: true, checks: "hidden/reachable/overflow across today, history, settings, review; maintenance round-trip; stable ordering; slow-load tolerance; wipe recognition; add-item search; error surface" };
   }
 
   global.CalSmoke = { run };

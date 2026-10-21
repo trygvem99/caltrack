@@ -118,7 +118,7 @@
         </div>
         <p class="hint" id="scan-hint">Adjust grams — macros rescale automatically.</p>
         <div id="scan-items"></div>
-        <button class="linkish" id="add-item-btn">＋ Add item manually</button>
+        <button class="linkish" id="add-item-btn">＋ Add item</button>
         <div class="card revise-card">
           <div class="revise-row">
             <input type="text" id="revise-input" placeholder="e.g. 3 eggs not 4, and the ham is my saved one" />
@@ -161,6 +161,10 @@
           <button class="btn small" id="fp-cancel">Close</button>
         </div>
         <p class="hint" id="fp-count"></p>
+        <label class="checkline" id="fp-lookup-opts" hidden>
+          <input type="checkbox" id="fp-save-lookup" checked />
+          Also save looked-up foods to my foods, so they are a pick next time
+        </label>
         <div id="fp-list"></div>
       </div>
     </div>

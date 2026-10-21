@@ -384,16 +384,22 @@ function renderBackupNag() {
 // One searchable list, used anywhere a food has to be chosen. A 30+ item
 // dropdown is unusable on a phone.
 let fpOnPick = null;
+// opts.lookup(query, save): offer "Look up <query>" for foods that are not saved
+// opts.manual(): offer "Type values myself"
+let fpOptions = {};
 
-function openFoodPicker(onPick) {
+function openFoodPicker(onPick, opts = {}) {
   fpOnPick = onPick;
+  fpOptions = opts;
   $("#fp-search").value = "";
+  $("#fp-lookup-opts").hidden = !opts.lookup;
   $("#food-picker").hidden = false;
   renderFoodPicker();
   $("#fp-search").focus();
 }
 function closeFoodPicker() {
   fpOnPick = null;
+  fpOptions = {};
   $("#food-picker").hidden = true;
 }
 function renderFoodPicker() {
@@ -419,8 +425,43 @@ function renderFoodPicker() {
     });
     wrap.appendChild(row);
   }
+  // Searching only saved foods meant anything new had to be typed in number by
+  // number. These rows make the search reach past your own list.
+  const raw = ($("#fp-search").value || "").trim();
+  if (fpOptions.lookup && raw) {
+    if (!hits.length) $("#fp-count").textContent = "None of your saved foods match.";
+    const row = document.createElement("button");
+    row.className = "fp-row fp-extra";
+    row.innerHTML = `<span class="fp-name"><span class="f-main">🔎 Look up “${esc(raw)}”</span><span class="f-sub">standard nutrition values — not one of your saved foods</span></span>`;
+    row.addEventListener("click", () => {
+      const cb = fpOptions.lookup;
+      const save = $("#fp-save-lookup").checked;
+      closeFoodPicker();
+      cb(raw, save);
+    });
+    wrap.appendChild(row);
+  }
+  if (fpOptions.manual) {
+    const row = document.createElement("button");
+    row.className = "fp-row fp-extra";
+    row.innerHTML = `<span class="fp-name"><span class="f-main">✎ Type values myself</span></span>`;
+    row.addEventListener("click", () => {
+      const cb = fpOptions.manual;
+      closeFoodPicker();
+      cb();
+    });
+    wrap.appendChild(row);
+  }
 }
 $("#fp-search").addEventListener("input", renderFoodPicker);
+// the keyboard's search/go key takes the first row: the best saved match, or
+// the lookup when nothing saved matches
+$("#fp-search").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const first = document.querySelector("#fp-list .fp-row");
+  if (first) first.click();
+});
 $("#fp-cancel").addEventListener("click", closeFoodPicker);
 $("#food-picker").addEventListener("click", (e) => {
   if (e.target.id === "food-picker") closeFoodPicker();
@@ -912,6 +953,7 @@ function renderScanItems() {
           ? `🔗 ${esc(foodTitle(foods.find((f) => f.id === it.food_id) || { name: "linked food" }))}`
           : "🔗 Search saved foods…"
       }</button>
+      ${it.source === "lookup" ? `<div class="badge-est">est · standard values${it.lookup_note ? " — " + esc(it.lookup_note) : ""}</div>` : ""}
       ${it.uplift ? `<div class="badge-uplift">+${Math.round((it.uplift - 1) * 1000) / 10}% pastry adjustment applied (cut mode)</div>` : ""}
       ${it.hidden_factor && it.unresolved ? `<div class="badge-hidden" data-f="hidden">● ${esc(it.hidden_factor)} — tap when resolved</div>` : ""}
       <div class="item-macros">
@@ -1043,7 +1085,67 @@ function addManualItem() {
   });
   renderScanItems();
 }
-$("#add-item-btn").addEventListener("click", addManualItem);
+// Cancel means don't add. Returns whole grams, or null.
+function askGrams(name, def) {
+  const v = prompt(`How many grams of ${name}?`, String(def));
+  if (v === null) return null;
+  const g = Number(String(v).replace(",", "."));
+  if (!(g > 0)) { alert("Enter the weight in grams."); return null; }
+  return Math.round(g);
+}
+
+function addSavedFoodToMeal(food) {
+  const g = askGrams(foodTitle(food), food.default_g || 100);
+  if (!g) return;
+  scanItems.push(foodToScanItem(food, g));
+  renderScanItems();
+}
+
+// A food that is not saved: standard reference values, marked as an estimate.
+// est is kept, so correcting the numbers afterwards is recorded like any other
+// correction of a model estimate.
+async function lookupFoodIntoMeal(query, save) {
+  const g = askGrams(query, 100);
+  if (!g) return;
+  const btn = $("#add-item-btn");
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = `Looking up ${query}…`;
+  try {
+    const r = await LLM.estimateIngredient(query);
+    const per = r.per_100g;
+    const name = r.name || query;
+    let food = null;
+    if (save) {
+      food = {
+        id: Data.newId(), name, aliases: [], per_100g: per,
+        basis: "estimate", unc: 0.15, note: r.note || `looked up ${todayStr()}`,
+        default_g: g, last_used: todayStr(),
+      };
+      await Data.foods.put(food);
+      foods.push(food);
+    }
+    const k = g / 100;
+    const m = { kcal: per.kcal * k, protein_g: per.protein_g * k, carbs_g: per.carbs_g * k, fat_g: per.fat_g * k };
+    scanItems.push({
+      name: food ? foodTitle(food) : name, grams: g,
+      base: { portion_g: g, ...m },
+      est: { portion_g: g, kcal_low: m.kcal * 0.85, kcal_high: m.kcal * 1.15, ...m },
+      provenance: "recalled", unc: 0.15, unresolved: false, hidden_factor: null,
+      food_id: food ? food.id : null, source: "lookup", lookup_note: r.note || "",
+    });
+    renderScanItems();
+  } catch (e) {
+    alert(`Could not look up "${query}": ${e.message}`);
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+}
+
+function addItemFromSearch() {
+  openFoodPicker(addSavedFoodToMeal, { lookup: lookupFoodIntoMeal, manual: addManualItem });
+}
+$("#add-item-btn").addEventListener("click", addItemFromSearch);
 
 $("#manual-meal-btn").addEventListener("click", () => {
   $("#scan-preview").src = "";
@@ -1054,7 +1156,7 @@ $("#manual-meal-btn").addEventListener("click", () => {
   startScanView();
   $("#scan-notes").textContent = "";
   openReview();
-  addManualItem();
+  addItemFromSearch();
 });
 
 function openEntryForEdit(e) {

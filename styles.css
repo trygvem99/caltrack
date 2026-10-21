@@ -330,3 +330,6 @@ details > summary { cursor: pointer; font-size: 15px; color: var(--dim); font-we
 .wipe-banner { border: 1px solid var(--warn); }
 .wipe-banner p { font-size: 14px; margin-bottom: 10px; }
 .wipe-banner .btn { width: 100%; }
+
+.fp-row.fp-extra .f-main { color: var(--accent); }
+.badge-est { font-size: 11px; color: #eab308; margin-top: 4px; }
