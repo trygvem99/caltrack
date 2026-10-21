@@ -207,11 +207,12 @@ question: one further question ONLY if the correction itself is genuinely ambigu
   // ---------- recipe from a screenshot or photo ----------
   const RECIPE_INGREDIENT = {
     type: "object", additionalProperties: false,
-    required: ["name", "grams", "as_written", "per_100g"],
+    required: ["name", "grams", "as_written", "food_id", "per_100g"],
     properties: {
       name: { type: "string" },
       grams: NUM,
       as_written: { type: "string" },
+      food_id: NULL_STR,
       per_100g: {
         type: "object", additionalProperties: false,
         required: ["kcal", "protein_g", "carbs_g", "fat_g"],
@@ -237,18 +238,19 @@ question: one further question ONLY if the correction itself is genuinely ambigu
 - grams: convert each quantity to grams for the WHOLE batch as written. Use standard weights: 1 US cup flour 125 g, sugar 200 g, water/milk 240 g, butter 227 g; 1 tbsp 15 g (oil 14 g); 1 tsp 5 g; one medium egg 50 g without shell; one medium onion 150 g; one garlic clove 5 g. For anything already in grams, millilitres or ounces, convert directly (1 oz 28.35 g, 1 lb 454 g, 1 ml water-like liquid 1 g).
 - If a quantity is vague ("a handful", "to taste", "a splash"), use a sensible small amount and say so in that item's as_written.
 - as_written: the quantity exactly as the recipe states it ("2 cups flour", "a pinch of salt"), so the person can check your conversion.
-- per_100g: standard reference nutrition for that ingredient as sold, in the form the recipe uses (raw unless it says cooked). These should match any nutrition table.
+- food_id: the person's own saved foods are listed in FOODS. When an ingredient is the same food as a FOODS entry, return that entry's id. Match on names AND aliases, loosely and ACROSS LANGUAGES: the recipe may be English while the saved foods carry Norwegian product names ("milk" = "Helmelk"/"melk", "flour" = "hvetemel", "olive oil" = "olivenolje", "eggs" = "egg", "Greek yogurt" = "gresk yoghurt"). A brand-name entry matches the generic ingredient. Prefer a match whenever it plainly applies — the person's saved values are exact, a reference value is a guess. Return null only when no saved food is that ingredient; do not force a match between different foods.
+- per_100g: standard reference nutrition for that ingredient as sold, in the form the recipe uses (raw unless it says cooked). These should match any nutrition table. Fill this in even when you return a food_id.
 - servings: the number of servings or pieces the recipe says it makes, or null.
 - finished_g: the finished weight of the whole batch in grams IF the recipe states it (a tin size, a total weight, "makes 12 x 60 g buns"). Do NOT estimate cooking losses — return null when it is not stated.
 - notes: one or two short sentences on anything the person should check — unit assumptions you made, whether quantities were per serving rather than per batch, or text you could not read. Empty string if there is nothing.
 - If the image is not a recipe, return an empty ingredients array and explain in notes.`;
 
-  function analyzeRecipePhoto(base64, mediaType = "image/jpeg") {
+  function analyzeRecipePhoto(base64, foodsDigest, mediaType = "image/jpeg") {
     return call({
       system: RECIPE_SYSTEM,
       content: [
         { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-        { type: "text", text: "Extract this recipe." },
+        { type: "text", text: `FOODS (id | name | aliases | kcal per 100g | default_g):\n${foodsDigest}\n\nExtract this recipe.` },
       ],
       schema: RECIPE_SCHEMA,
       maxTokens: 3000,

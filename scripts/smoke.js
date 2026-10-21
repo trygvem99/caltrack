@@ -171,7 +171,33 @@
     closeFoodPicker();
   }
 
-  // 9. A failure must be visible, never a silent return to the same screen.
+  // 9. A recipe ingredient must be editable beyond its weight, and whether it
+  //    is a saved food or an estimate must stay visible on long names. A
+  //    suggestion you could only accept or delete was the complaint.
+  async function recipeIngredientsEditable() {
+    await show("settings");
+    openRecipeBuilder({ name: "smoke", ingredients: [
+      { name: "an extremely long saved food name that cannot possibly fit on one phone row", food_id: null, grams: 100, estimated: true, as_written: "1 cup", kcal: 100, protein_g: 1, carbs_g: 1, fat_g: 1 },
+    ] });
+    const row = document.querySelector("#rb-ingredients .ingredient-row");
+    const tags = row.querySelector(".ing-tags").getBoundingClientRect();
+    const name = row.querySelector(".ing-name").getBoundingClientRect();
+    check(tags.width > 0 && tags.right <= name.right + 0.5, "est/saved tag clipped off a long ingredient name");
+    row.querySelector(".ing-name").click();
+    const ed = document.querySelector(".ing-editor");
+    check(!!ed, "tapping an ingredient does not open its editor");
+    if (ed) {
+      for (const f of ["name", "kcal", "protein_g", "carbs_g", "fat_g"]) check(!!ed.querySelector(`[data-f="${f}"]`), `ingredient editor has no ${f} field`);
+      check(!!ed.querySelector('[data-a="swap"]'), "ingredient editor cannot swap to a saved food");
+      const kcal = ed.querySelector('[data-f="kcal"]');
+      kcal.value = "250";
+      kcal.dispatchEvent(new Event("change"));
+      check(rbIngredients[0].kcal === 250 && rbIngredients[0].estimated === false, "editing kcal per 100 g did not apply");
+    }
+    closeRecipeBuilder();
+  }
+
+  // 10. A failure must be visible, never a silent return to the same screen.
   function errorsAreVisible() {
     const t = document.querySelector("#toast");
     check(!!t && typeof showError === "function", "no error surface");
@@ -216,13 +242,14 @@
     await slowLoadStillLoads();
     wipeIsRecognised();
     addSearchReachesPastSaved();
+    await recipeIngredientsEditable();
     errorsAreVisible();
 
     // return a copy: `fail` is reused and cleared by the next run, which would
     // otherwise empty the failure list a caller is still holding
     return fail.length
       ? { ok: false, failures: fail.slice() }
-      : { ok: true, checks: "hidden/reachable/overflow across today, history, settings, review; maintenance round-trip; stable ordering; slow-load tolerance; wipe recognition; add-item search; error surface" };
+      : { ok: true, checks: "hidden/reachable/overflow across today, history, settings, review; maintenance round-trip; stable ordering; slow-load tolerance; wipe recognition; add-item search; recipe ingredient editing; error surface" };
   }
 
   global.CalSmoke = { run };

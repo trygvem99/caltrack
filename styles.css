@@ -333,3 +333,22 @@ details > summary { cursor: pointer; font-size: 15px; color: var(--dim); font-we
 
 .fp-row.fp-extra .f-main { color: var(--accent); }
 .badge-est { font-size: 11px; color: #eab308; margin-top: 4px; }
+
+/* ingredient name is the way into its editor */
+button.ing-name {
+  background: none; border: none; padding: 4px 0; text-align: left; cursor: pointer;
+  font: inherit; font-size: 13px;
+}
+.ing-pencil { color: var(--dim); font-size: 11px; }
+.ing-editor {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px; margin: 2px 0 10px;
+}
+.ing-editor .field-grid { grid-template-columns: repeat(4, 1fr); }
+.ing-editor .btn { margin-top: 8px; }
+
+#rb-ingredients button.ing-name { white-space: normal; overflow: visible; }
+.ing-line { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.ing-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ing-tags { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+#rb-ingredients .ing-written { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

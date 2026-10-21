@@ -1538,6 +1538,7 @@ for (const sel of ["#weekday-targets", "#maintenance-grid", "#f-prot-target", "#
 let rbIngredients = [];
 let rbEditingId = null;
 let rbPicked = null;   // food chosen through the searchable picker
+let rbOpenIdx = null;  // ingredient row whose editor is open
 
 // `draft` is either a saved recipe (editing) or a scanned one with no id.
 function openRecipeBuilder(draft, opts = {}) {
@@ -1545,6 +1546,7 @@ function openRecipeBuilder(draft, opts = {}) {
   rbEditingId = editing ? draft.id : null;
   rbIngredients = draft ? JSON.parse(JSON.stringify(draft.ingredients || [])) : [];
   rbPicked = null;
+  rbOpenIdx = null;
   $("#rb-heading").textContent = editing ? "Edit recipe" : opts.scanned ? "From your screenshot" : "New recipe";
   $("#rb-save").textContent = editing ? "Save changes" : "Save recipe";
   $("#rb-name").value = (draft && draft.name) || "";
@@ -1587,9 +1589,11 @@ function renderRecipeBuilder() {
   rbIngredients.forEach((ing, i) => {
     const row = document.createElement("div");
     row.className = "ingredient-row";
-    row.innerHTML = `<span class="ing-name">${esc(ing.name)}${ing.estimated ? ' <span class="chip est">est</span>' : ""}${
+    row.innerHTML = `<button class="ing-name" data-a="edit"><span class="ing-line"><span class="ing-text">${esc(ing.name)}</span><span class="ing-tags">${
+      ing.food_id ? '<span class="chip label">saved</span>' : ing.estimated ? '<span class="chip est">est</span>' : ""
+    }<span class="ing-pencil">✎</span></span></span>${
       ing.as_written ? `<span class="ing-written">${esc(ing.as_written)}</span>` : ""
-    }</span>
+    }</button>
       <input type="number" class="ing-g" min="0" value="${ing.grams}" inputmode="decimal" /><span class="ing-unit">g</span>
       <span class="ing-kcal">${Math.round(ing.kcal)} kcal</span>
       <button class="del">✕</button>`;
@@ -1602,10 +1606,17 @@ function renderRecipeBuilder() {
     });
     row.querySelector(".del").addEventListener("click", () => {
       rbIngredients.splice(i, 1);
+      if (rbOpenIdx === i) rbOpenIdx = null;
+      else if (rbOpenIdx > i) rbOpenIdx--;
       syncBatchDefault();
       renderRecipeBuilder();
     });
+    row.querySelector('[data-a="edit"]').addEventListener("click", () => {
+      rbOpenIdx = rbOpenIdx === i ? null : i;
+      renderRecipeBuilder();
+    });
     wrap.appendChild(row);
+    if (rbOpenIdx === i) wrap.appendChild(ingredientEditor(ing));
   });
 
   const raw = rbIngredients.reduce(
@@ -1626,6 +1637,61 @@ function renderRecipeBuilder() {
       : rbIngredients.length
         ? "Enter the finished batch weight to derive per-100g values."
         : "";
+}
+
+// Every part of an ingredient is editable, not only its weight. A suggestion
+// you could not correct — swap for your own saved food, rename, fix the
+// numbers — was a suggestion you could only accept or delete.
+function ingredientEditor(ing) {
+  const div = document.createElement("div");
+  div.className = "ing-editor";
+  const per = (f) => (ing.grams > 0 ? r1((ing[f] * 100) / ing.grams) : 0);
+  const linked = ing.food_id ? foods.find((f) => f.id === ing.food_id) : null;
+  div.innerHTML = `
+    <label>Name<input type="text" data-f="name" value="${esc(ing.name)}" /></label>
+    <button class="link-food ${linked ? "linked" : ""}" data-a="swap">${
+      linked ? `🔗 ${esc(foodTitle(linked))} — tap to change` : "🔗 Use one of my saved foods instead"
+    }</button>
+    <p class="hint">Per 100 g${linked ? " — from your saved food; editing these unlinks it" : ing.estimated ? " — estimated; correct them if you know better" : ""}:</p>
+    <div class="field-grid">
+      <label>kcal<input type="number" step="0.1" min="0" data-f="kcal" value="${per("kcal")}" /></label>
+      <label>P<input type="number" step="0.1" min="0" data-f="protein_g" value="${per("protein_g")}" /></label>
+      <label>C<input type="number" step="0.1" min="0" data-f="carbs_g" value="${per("carbs_g")}" /></label>
+      <label>F<input type="number" step="0.1" min="0" data-f="fat_g" value="${per("fat_g")}" /></label>
+    </div>
+    <button class="btn small" data-a="done">Done</button>`;
+
+  div.querySelector('[data-f="name"]').addEventListener("change", (e) => {
+    const v = e.target.value.trim();
+    if (v) ing.name = v;
+    renderRecipeBuilder();
+  });
+  for (const f of ["kcal", "protein_g", "carbs_g", "fat_g"]) {
+    div.querySelector(`[data-f="${f}"]`).addEventListener("change", (e) => {
+      const v = Number(e.target.value);
+      if (!(v >= 0)) { renderRecipeBuilder(); return; }
+      ing[f] = r1((v * ing.grams) / 100);
+      // your own numbers: no longer a guess, no longer the saved food
+      ing.estimated = false;
+      ing.food_id = null;
+      renderRecipeBuilder();
+    });
+  }
+  div.querySelector('[data-a="swap"]').addEventListener("click", () => {
+    if (!foods.length) return alert("No saved foods yet.");
+    openFoodPicker((food) => {
+      ing.food_id = food.id;
+      ing.name = foodTitle(food);
+      ing.estimated = false;
+      setIngredientGrams(ing, ing.grams); // recompute from the saved food's per-100g
+      renderRecipeBuilder();
+    });
+  });
+  div.querySelector('[data-a="done"]').addEventListener("click", () => {
+    rbOpenIdx = null;
+    renderRecipeBuilder();
+  });
+  return div;
 }
 
 // Re-weigh an ingredient. When it is linked to a saved food, recompute from
@@ -1676,7 +1742,7 @@ $("#recipe-input").addEventListener("change", async (ev) => {
   label.classList.add("busy");
   try {
     const { base64 } = await fileToResized(file, 1600);
-    const r = await LLM.analyzeRecipePhoto(base64);
+    const r = await LLM.analyzeRecipePhoto(base64, foodsDigest());
     const ings = [];
     let linked = 0;
     for (const i of r.ingredients || []) {
@@ -1684,7 +1750,10 @@ $("#recipe-input").addEventListener("change", async (ev) => {
       if (!(grams > 0)) continue;
       const k = grams / 100;
       // Your own labelled food beats reference data for the same ingredient.
-      const food = findFoodMatch(i.name);
+      // The model does the matching (it reads across languages and wording);
+      // literal text matching missed most saved foods and could also hit the
+      // wrong one ("mel" inside "caramel").
+      const food = i.food_id ? foods.find((f) => f.id === i.food_id) || null : null;
       const per = food ? food.per_100g : i.per_100g;
       if (food) linked++;
       ings.push({
